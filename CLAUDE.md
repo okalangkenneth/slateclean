@@ -114,7 +114,11 @@ After Effects:
 **Claude Code: Update this section at the end of every session.**
 
 ### ✅ COMPLETED
-<!-- Move completed items here with file paths -->
+- CleanupLog model — `SlateClean.Core/Models/CleanupLog.cs`
+- AppSettings model — `SlateClean.Core/Models/AppSettings.cs`
+- SlateCleanDbContext with SQLite — `SlateClean.Core/Data/SlateCleanDbContext.cs`
+- DiskMonitorService with 60s polling and 5-min throttle — `SlateClean.Core/Services/DiskMonitorService.cs`
+- 20 xUnit tests — all passing
 
 ### 🔨 IN PROGRESS
 <!-- Current work -->
@@ -125,9 +129,9 @@ After Effects:
 - [ ] Solution scaffold (3 projects)
 - [ ] CacheLocator per app (DaVinci, Premiere, AE)
 - [ ] Cache size calculation
-- [ ] DiskMonitorService (60s polling)
+- [x] DiskMonitorService (60s polling)
 - [ ] CleanupService with safe deletion
-- [ ] SQLite logging via EF Core
+- [x] SQLite logging via EF Core
 - [ ] System tray icon + right-click menu
 - [ ] Manual "Clear Now" per app from tray menu
 - [ ] Windows startup toggle
