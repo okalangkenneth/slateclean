@@ -3,10 +3,11 @@ namespace SlateClean.Core.Models;
 public class CleanupLog
 {
     public int Id { get; set; }
-    public DateTime Timestamp { get; set; }
     public string AppName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
-    public long SizeBytes { get; set; }
-    public bool Succeeded { get; set; }
-    public string? Error { get; set; }
+    public string DirectoryPath { get; set; } = string.Empty;
+    public int FilesDeleted { get; set; }
+    public long BytesFreed { get; set; }
+    public DateTime TimestampUtc { get; set; }
+    public bool Success { get; set; }
+    public string? ErrorMessage { get; set; }
 }
