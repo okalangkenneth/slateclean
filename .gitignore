@@ -1,0 +1,29 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+## Build artifacts
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.pdb
+
+## VS Code / Rider
+.vscode/
+.idea/
+
+## Env / secrets
+.env
+.env.local
+*.pfx
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Claude Code (local-only)
+.claude/settings.local.json
