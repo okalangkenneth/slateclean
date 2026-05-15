@@ -1,23 +1,13 @@
-using SlateClean.Core.Models;
-
 namespace SlateClean.Core.CacheLocations;
 
-public class PremiereCacheLocator : ICacheLocator
+public class PremiereCacheLocator : CacheLocatorBase
 {
-    public string AppName => "Premiere Pro";
+    public override string AppName => "Premiere Pro";
 
-    public IEnumerable<CacheLocation> Locate()
+    public override IEnumerable<DirectoryInfo> GetCacheDirectories()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        foreach (var sub in new[] { "Media Cache Files", "Media Cache" })
-        {
-            var path = Path.Combine(appData, "Adobe", "Common", sub);
-            yield return new CacheLocation
-            {
-                AppName = AppName,
-                Path = path,
-                Exists = Directory.Exists(path),
-            };
-        }
+        yield return new DirectoryInfo(Path.Combine(appData, "Adobe", "Common", "Media Cache Files"));
+        yield return new DirectoryInfo(Path.Combine(appData, "Adobe", "Common", "Media Cache"));
     }
 }

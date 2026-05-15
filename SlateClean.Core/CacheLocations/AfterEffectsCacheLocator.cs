@@ -1,36 +1,22 @@
-using SlateClean.Core.Models;
-
 namespace SlateClean.Core.CacheLocations;
 
-public class AfterEffectsCacheLocator : ICacheLocator
+public class AfterEffectsCacheLocator : CacheLocatorBase
 {
-    public string AppName => "After Effects";
+    public override string AppName => "After Effects";
 
-    public IEnumerable<CacheLocation> Locate()
+    public override IEnumerable<DirectoryInfo> GetCacheDirectories()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        var sharedCache = Path.Combine(appData, "Adobe", "Common", "Media Cache Files");
-        yield return new CacheLocation
-        {
-            AppName = AppName,
-            Path = sharedCache,
-            Exists = Directory.Exists(sharedCache),
-        };
+        yield return new DirectoryInfo(Path.Combine(appData, "Adobe", "Common", "Media Cache Files"));
 
-        var aeRoot = Path.Combine(localAppData, "Adobe", "After Effects");
-        if (Directory.Exists(aeRoot))
+        var aeRoot = new DirectoryInfo(Path.Combine(localAppData, "Adobe", "After Effects"));
+        if (aeRoot.Exists)
         {
-            foreach (var versionDir in Directory.EnumerateDirectories(aeRoot))
+            foreach (var versionDir in aeRoot.EnumerateDirectories())
             {
-                var diskCache = Path.Combine(versionDir, "disk cache");
-                yield return new CacheLocation
-                {
-                    AppName = AppName,
-                    Path = diskCache,
-                    Exists = Directory.Exists(diskCache),
-                };
+                yield return new DirectoryInfo(Path.Combine(versionDir.FullName, "disk cache"));
             }
         }
     }

@@ -36,7 +36,7 @@ when free space drops below a user-defined threshold.
 
 ## Tech Stack
 
-- **Runtime**: .NET 8
+- **Runtime**: .NET 9
 - **UI Framework**: WPF (dashboard window)
 - **System Tray**: NotifyIcon (WPF + Windows Forms interop)
 - **Database**: SQLite via EF Core (cleanup history, settings)
