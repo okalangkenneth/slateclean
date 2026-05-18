@@ -42,13 +42,20 @@
                              Background="#f3f4f6"
                              BorderBrush="#e5e7eb"/>
 
-                <TextBlock Margin="0,8,0,0"
-                           FontSize="11"
-                           Foreground="#9ca3af"
-                           HorizontalAlignment="Right">
-                    <Run Text="{Binding UsedPercent, StringFormat={}{0:F1}%, Mode=OneWay}"/>
-                    <Run Text=" used"/>
-                </TextBlock>
+                <Grid Margin="0,8,0,0">
+                    <TextBlock HorizontalAlignment="Left"
+                               FontSize="11"
+                               Foreground="#9ca3af">
+                        <Run Text="Last updated: "/>
+                        <Run Text="{Binding LastUpdatedDisplay, Mode=OneWay}"/>
+                    </TextBlock>
+                    <TextBlock HorizontalAlignment="Right"
+                               FontSize="11"
+                               Foreground="#9ca3af">
+                        <Run Text="{Binding UsedPercent, StringFormat={}{0:F1}%, Mode=OneWay}"/>
+                        <Run Text=" used"/>
+                    </TextBlock>
+                </Grid>
             </StackPanel>
         </Border>
     </Grid>

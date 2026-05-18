@@ -31,6 +31,10 @@ public partial class DashboardViewModel : ObservableObject
     [ObservableProperty]
     private bool _hasReading;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LastUpdatedDisplay))]
+    private DateTime _lastUpdatedUtc;
+
     public DashboardViewModel(DiskMonitorService diskMonitor)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
@@ -48,6 +52,9 @@ public partial class DashboardViewModel : ObservableObject
 
     public string TotalDisplay => HasReading ? Format(TotalBytes) : "—";
 
+    public string LastUpdatedDisplay =>
+        HasReading ? LastUpdatedUtc.ToLocalTime().ToString("HH:mm:ss") : "—";
+
     private void OnDiskSpaceUpdated(object? sender, DiskSpaceUpdatedEventArgs e)
     {
         // Timer callback is on a ThreadPool thread; marshal to UI thread so
@@ -57,9 +64,11 @@ public partial class DashboardViewModel : ObservableObject
             DriveRoot = e.DriveRoot;
             FreeBytes = e.FreeBytes;
             TotalBytes = e.TotalBytes;
+            LastUpdatedUtc = e.ObservedAtUtc;
             HasReading = true;
             OnPropertyChanged(nameof(FreeDisplay));
             OnPropertyChanged(nameof(TotalDisplay));
+            OnPropertyChanged(nameof(LastUpdatedDisplay));
         });
     }
 
