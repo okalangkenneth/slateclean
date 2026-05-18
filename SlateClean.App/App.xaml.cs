@@ -43,17 +43,15 @@ public partial class App : System.Windows.Application
         // Core — SQLite context as singleton so all services share state.
         services.AddSingleton<SlateCleanDbContext>(_ => new SlateCleanDbContext());
 
-        // Cache locators — registered individually and as an array for
-        // services that take ICacheLocator[].
-        services.AddSingleton<DaVinciCacheLocator>();
-        services.AddSingleton<PremiereCacheLocator>();
-        services.AddSingleton<AfterEffectsCacheLocator>();
-        services.AddSingleton<ICacheLocator[]>(sp => new ICacheLocator[]
-        {
-            sp.GetRequiredService<DaVinciCacheLocator>(),
-            sp.GetRequiredService<PremiereCacheLocator>(),
-            sp.GetRequiredService<AfterEffectsCacheLocator>(),
-        });
+        // Cache locators — registered against ICacheLocator so that
+        // IEnumerable<ICacheLocator> resolves to all three in the aggregator.
+        // The ICacheLocator[] registration is for CleanupService, which takes
+        // an array; it forwards to the same singletons via IEnumerable resolution.
+        services.AddSingleton<ICacheLocator, DaVinciCacheLocator>();
+        services.AddSingleton<ICacheLocator, PremiereCacheLocator>();
+        services.AddSingleton<ICacheLocator, AfterEffectsCacheLocator>();
+        services.AddSingleton<ICacheLocator[]>(sp =>
+            sp.GetServices<ICacheLocator>().ToArray());
 
         services.AddSingleton<CacheLocator>();
         services.AddSingleton<CleanupService>();
