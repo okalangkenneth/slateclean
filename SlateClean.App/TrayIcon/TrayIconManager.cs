@@ -15,6 +15,7 @@ public class TrayIconManager : IDisposable
     private readonly DiskMonitorService _diskMonitor;
     private readonly StartupService _startupService;
     private readonly DashboardWindow _dashboard;
+    private readonly SettingsWindow _settings;
     private readonly ILogger<TrayIconManager> _logger;
     private readonly WinForms.NotifyIcon _notifyIcon;
     private readonly WinForms.ToolStripMenuItem _startupItem;
@@ -25,6 +26,7 @@ public class TrayIconManager : IDisposable
         DiskMonitorService diskMonitor,
         StartupService startupService,
         DashboardWindow dashboard,
+        SettingsWindow settings,
         ILogger<TrayIconManager> logger)
     {
         _cacheLocator = cacheLocator;
@@ -32,6 +34,7 @@ public class TrayIconManager : IDisposable
         _diskMonitor = diskMonitor;
         _startupService = startupService;
         _dashboard = dashboard;
+        _settings = settings;
         _logger = logger;
 
         _notifyIcon = new WinForms.NotifyIcon
@@ -60,6 +63,7 @@ public class TrayIconManager : IDisposable
         menu.Items.Add(_startupItem);
 
         menu.Items.Add(new WinForms.ToolStripSeparator());
+        menu.Items.Add("Settings…", null, OnOpenSettings);
         menu.Items.Add("Exit", null, OnExit);
 
         _notifyIcon.ContextMenuStrip = menu;
@@ -149,6 +153,22 @@ public class TrayIconManager : IDisposable
             "SlateClean — Low disk space",
             $"Free space {freeGb:F1} GB is below threshold {thresholdGb:F0} GB",
             WinForms.ToolTipIcon.Warning);
+    }
+
+    private void OnOpenSettings(object? sender, EventArgs e)
+    {
+        if (!_settings.IsVisible)
+        {
+            _settings.Show();
+        }
+        if (_settings.WindowState == WindowState.Minimized)
+        {
+            _settings.WindowState = WindowState.Normal;
+        }
+        _settings.Activate();
+        _settings.Topmost = true;
+        _settings.Topmost = false;
+        _settings.Focus();
     }
 
     private void OnExit(object? sender, EventArgs e)

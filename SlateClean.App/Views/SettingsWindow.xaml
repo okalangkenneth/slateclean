@@ -1,8 +1,106 @@
 <Window x:Class="SlateClean.App.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SlateClean Settings" Height="400" Width="600">
-    <Grid>
-        <TextBlock Text="Settings placeholder" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20"/>
+        Title="SlateClean Settings" Height="540" Width="560"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#f9fafb">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Settings"
+                   FontSize="22" FontWeight="SemiBold"
+                   Foreground="#111827"
+                   Margin="0,0,0,20"/>
+
+        <StackPanel Grid.Row="1">
+
+            <!-- Soft threshold -->
+            <Border Background="White"
+                    BorderBrush="#e5e7eb" BorderThickness="1"
+                    CornerRadius="8" Padding="18"
+                    Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="Soft threshold"
+                               FontSize="13" FontWeight="SemiBold"
+                               Foreground="#374151"/>
+                    <TextBlock Text="When free space drops below this, SlateClean prompts you before cleaning."
+                               FontSize="11" Foreground="#6b7280"
+                               TextWrapping="Wrap"
+                               Margin="0,2,0,10"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Text="{Binding ThresholdGb, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="80" Padding="6,4"/>
+                        <TextBlock Text=" GB"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"
+                                   Foreground="#374151"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Recycle bin toggle -->
+            <Border Background="White"
+                    BorderBrush="#e5e7eb" BorderThickness="1"
+                    CornerRadius="8" Padding="18"
+                    Margin="0,0,0,14">
+                <StackPanel>
+                    <CheckBox IsChecked="{Binding SendToRecycleBin}"
+                              Content="Send to Recycle Bin instead of permanent delete"
+                              FontSize="13" Foreground="#374151"/>
+                    <TextBlock Text="Recoverable, but does not free disk space until the Recycle Bin is emptied. Default is off because media caches can be very large."
+                               FontSize="11" Foreground="#6b7280"
+                               TextWrapping="Wrap"
+                               Margin="22,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Critical threshold opt-in -->
+            <Border Background="White"
+                    BorderBrush="#e5e7eb" BorderThickness="1"
+                    CornerRadius="8" Padding="18">
+                <StackPanel>
+                    <CheckBox IsChecked="{Binding CriticalThresholdEnabled}"
+                              Content="Enable critical threshold (silent auto-clean)"
+                              FontSize="13" Foreground="#374151"/>
+                    <TextBlock Text="{Binding CriticalConsentText, Mode=OneWay}"
+                               FontSize="11" Foreground="#6b7280"
+                               TextWrapping="Wrap"
+                               Margin="22,4,0,10"/>
+                    <StackPanel Orientation="Horizontal" Margin="22,0,0,0"
+                                IsEnabled="{Binding CriticalThresholdEnabled}">
+                        <TextBlock Text="Critical threshold: "
+                                   VerticalAlignment="Center"
+                                   FontSize="12" Foreground="#374151"/>
+                        <TextBox Text="{Binding CriticalThresholdGb, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="80" Padding="6,4"/>
+                        <TextBlock Text=" GB"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"
+                                   Foreground="#374151"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,18,0,0">
+            <Button Content="Cancel"
+                    Command="{Binding CancelCommand}"
+                    Width="90" Padding="0,6"
+                    Margin="0,0,8,0"/>
+            <Button Content="Save"
+                    Command="{Binding SaveCommand}"
+                    Width="90" Padding="0,6"
+                    Background="#3b82f6" Foreground="White"
+                    BorderBrush="#3b82f6"/>
+        </StackPanel>
     </Grid>
 </Window>

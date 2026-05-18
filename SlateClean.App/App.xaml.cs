@@ -24,9 +24,12 @@ public partial class App : System.Windows.Application
             .ConfigureServices(ConfigureServices)
             .Build();
 
-        // Eagerly create the SQLite database before any service uses it.
+        // Eagerly create the SQLite database and apply any pending schema
+        // additions before any service uses it. EnsureSchemaUpToDate is
+        // idempotent: on fresh installs it just creates tables; on upgraded
+        // installs it adds new columns/tables without dropping user data.
         var db = _host.Services.GetRequiredService<SlateCleanDbContext>();
-        db.Database.EnsureCreated();
+        db.EnsureSchemaUpToDate();
 
         // Resolve the tray manager (which also resolves the singleton dashboard).
         var tray = _host.Services.GetRequiredService<TrayIconManager>();
@@ -57,11 +60,14 @@ public partial class App : System.Windows.Application
         services.AddSingleton<CleanupService>();
         services.AddSingleton<DiskMonitorService>();
         services.AddSingleton<StartupService>();
+        services.AddSingleton<SettingsRepository>();
 
         // ViewModels and Windows — singletons so window state and VM state
         // persist across hide/show cycles.
         services.AddSingleton<DashboardViewModel>();
         services.AddSingleton<DashboardWindow>();
+        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<SettingsWindow>();
 
         // Tray must be singleton — only one icon in the notification area.
         services.AddSingleton<TrayIconManager>();
