@@ -29,6 +29,7 @@ public class DiskMonitorService : IDisposable
     public string DriveRoot { get; set; } = "C:\\";
 
     public event EventHandler<DiskThresholdBreachedEventArgs>? DiskThresholdBreached;
+    public event EventHandler<DiskSpaceUpdatedEventArgs>? DiskSpaceUpdated;
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -57,9 +58,11 @@ public class DiskMonitorService : IDisposable
     {
         var thresholdBytes = (long)ThresholdGb * 1024L * 1024L * 1024L;
         long freeBytes;
+        long totalBytes;
         try
         {
             freeBytes = GetFreeBytes(DriveRoot);
+            totalBytes = GetTotalBytes(DriveRoot);
         }
         catch (Exception ex)
         {
@@ -67,9 +70,13 @@ public class DiskMonitorService : IDisposable
             return;
         }
 
+        var observedAt = _utcNow();
+        DiskSpaceUpdated?.Invoke(this,
+            new DiskSpaceUpdatedEventArgs(DriveRoot, freeBytes, totalBytes, observedAt));
+
         if (freeBytes >= thresholdBytes) return;
 
-        var now = _utcNow();
+        var now = observedAt;
         lock (_gate)
         {
             if (_lastEventAtUtc is not null && now - _lastEventAtUtc.Value < EventThrottle)
@@ -88,6 +95,9 @@ public class DiskMonitorService : IDisposable
 
     protected virtual long GetFreeBytes(string driveRoot) =>
         new DriveInfo(driveRoot).AvailableFreeSpace;
+
+    protected virtual long GetTotalBytes(string driveRoot) =>
+        new DriveInfo(driveRoot).TotalSize;
 
     private void SafePoll()
     {

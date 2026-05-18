@@ -10,12 +10,14 @@ public class DiskMonitorServiceTests
     private sealed class StubMonitor : DiskMonitorService
     {
         public long FreeBytesValue { get; set; }
+        public long TotalBytesValue { get; set; } = 500L * 1024 * 1024 * 1024;
 
         public StubMonitor(Func<DateTime> now)
             : base(Array.Empty<ICacheLocator>(), NullLogger<DiskMonitorService>.Instance, now)
         { }
 
         protected override long GetFreeBytes(string driveRoot) => FreeBytesValue;
+        protected override long GetTotalBytes(string driveRoot) => TotalBytesValue;
     }
 
     [Fact]
@@ -75,6 +77,50 @@ public class DiskMonitorServiceTests
         monitor.Poll();
 
         Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void Poll_AlwaysRaisesDiskSpaceUpdated_RegardlessOfThreshold()
+    {
+        var now = new DateTime(2026, 5, 18, 9, 0, 0, DateTimeKind.Utc);
+        var monitor = new StubMonitor(() => now)
+        {
+            ThresholdGb = 20,
+            FreeBytesValue = 100L * 1024 * 1024 * 1024,
+            TotalBytesValue = 500L * 1024 * 1024 * 1024,
+            DriveRoot = "D:\\",
+        };
+
+        DiskSpaceUpdatedEventArgs? received = null;
+        monitor.DiskSpaceUpdated += (_, e) => received = e;
+
+        monitor.Poll();
+
+        Assert.NotNull(received);
+        Assert.Equal("D:\\", received!.DriveRoot);
+        Assert.Equal(100L * 1024 * 1024 * 1024, received.FreeBytes);
+        Assert.Equal(500L * 1024 * 1024 * 1024, received.TotalBytes);
+        Assert.Equal(now, received.ObservedAtUtc);
+    }
+
+    [Fact]
+    public void Poll_RaisesDiskSpaceUpdated_BeforeThresholdEvent_OnBreach()
+    {
+        var now = new DateTime(2026, 5, 18, 9, 0, 0, DateTimeKind.Utc);
+        var monitor = new StubMonitor(() => now)
+        {
+            ThresholdGb = 20,
+            FreeBytesValue = 5L * 1024 * 1024 * 1024,
+            TotalBytesValue = 500L * 1024 * 1024 * 1024,
+        };
+
+        var order = new List<string>();
+        monitor.DiskSpaceUpdated += (_, _) => order.Add("space");
+        monitor.DiskThresholdBreached += (_, _) => order.Add("breach");
+
+        monitor.Poll();
+
+        Assert.Equal(new[] { "space", "breach" }, order);
     }
 
     [Fact]
