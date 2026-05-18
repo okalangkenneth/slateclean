@@ -12,6 +12,13 @@ public partial class DashboardWindow : Window
         DataContext = viewModel;
     }
 
+    // Parameterless ctor for the XAML smoke test, which supplies a stub VM
+    // via DataContext rather than constructing real services.
+    internal DashboardWindow()
+    {
+        InitializeComponent();
+    }
+
     protected override void OnClosing(CancelEventArgs e)
     {
         // Tray-driven lifetime: the X button hides the window so the singleton
