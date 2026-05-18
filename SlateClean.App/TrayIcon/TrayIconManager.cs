@@ -14,22 +14,24 @@ public class TrayIconManager : IDisposable
     private readonly CleanupService _cleanupService;
     private readonly DiskMonitorService _diskMonitor;
     private readonly StartupService _startupService;
+    private readonly DashboardWindow _dashboard;
     private readonly ILogger<TrayIconManager> _logger;
     private readonly WinForms.NotifyIcon _notifyIcon;
     private readonly WinForms.ToolStripMenuItem _startupItem;
-    private DashboardWindow? _dashboard;
 
     public TrayIconManager(
         CacheLocator cacheLocator,
         CleanupService cleanupService,
         DiskMonitorService diskMonitor,
         StartupService startupService,
+        DashboardWindow dashboard,
         ILogger<TrayIconManager> logger)
     {
         _cacheLocator = cacheLocator;
         _cleanupService = cleanupService;
         _diskMonitor = diskMonitor;
         _startupService = startupService;
+        _dashboard = dashboard;
         _logger = logger;
 
         _notifyIcon = new WinForms.NotifyIcon
@@ -40,7 +42,13 @@ public class TrayIconManager : IDisposable
         };
 
         var menu = new WinForms.ContextMenuStrip();
-        menu.Items.Add("Open Dashboard", null, OnOpenDashboard);
+
+        var openItem = new WinForms.ToolStripMenuItem("Open Dashboard");
+        openItem.Font = new Font(openItem.Font, System.Drawing.FontStyle.Bold);
+        openItem.Click += OnOpenDashboard;
+        menu.Items.Add(openItem);
+
+        menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("Clear Now", null, OnClearNow);
 
         _startupItem = new WinForms.ToolStripMenuItem("Run at Windows startup")
@@ -67,16 +75,20 @@ public class TrayIconManager : IDisposable
 
     private void OnOpenDashboard(object? sender, EventArgs e)
     {
-        if (_dashboard is null || !_dashboard.IsLoaded)
+        if (!_dashboard.IsVisible)
         {
-            _dashboard = new DashboardWindow();
-            _dashboard.Closed += (_, _) => _dashboard = null;
             _dashboard.Show();
         }
-        else
+
+        if (_dashboard.WindowState == WindowState.Minimized)
         {
-            _dashboard.Activate();
+            _dashboard.WindowState = WindowState.Normal;
         }
+
+        _dashboard.Activate();
+        _dashboard.Topmost = true;
+        _dashboard.Topmost = false;
+        _dashboard.Focus();
     }
 
     private async void OnClearNow(object? sender, EventArgs e)
