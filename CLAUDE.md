@@ -129,7 +129,20 @@ After Effects:
 - 24 xUnit tests — all passing
 
 ### 🔨 IN PROGRESS
-<!-- Current work -->
+- Slice 6 — Auto-clean trigger. 6a + 6b + observability fix landed (full dry-run
+  pipeline runs end-to-end without deletion). 6c–6f remaining: Review window +
+  soft-path execution, critical-path silent execution, Snooze 1h, TriggeredBy
+  column on CleanupLog.
+
+### ✅ COMPLETED (Phase 2)
+- Slice 1 — DI host + singleton DashboardWindow/VM, tray double-click, Hide-on-close — `ab9d2e8`
+- Slice 2 — Disk usage card bound to DiskMonitorService, "Last updated" timestamp — `52141ac`, `cda1234`, `2f864c0`
+- Slice 3 — Per-app cache sizes with async refresh — `1c2a8fd`, fix in `c8bb96e`
+- Slice 4 — XAML smoke test (`421e625`) + Settings UI / SQLite persistence for soft threshold, Recycle Bin toggle (default off), critical-threshold opt-in with explicit consent text, SettingsAuditLog row on critical opt-in — `5bcf7df`
+- Slice 5 — Cleanup history card with auto-refresh on Clear Now via CleanupService.CleanupCompleted event — `2c0d593`
+- Slice 6a — `CleanupPlan` record + `CleanupService.BuildPlanAsync`; shared `EnumerateEligibleFiles` predicate so dry-run = execution — `e6d20a7`
+- Slice 6b — Tier-aware DiskThresholdBreached (Soft/Critical), per-tier edge-triggered hysteresis + 5-min throttle, settings-driven via `Func<AppSettings>`, AutoCleanCoordinator builds plans and logs only (no execution) — `68d10db`
+- Observability — FileLoggerProvider writes Information+ to `%LocalAppData%\SlateClean\logs\slateclean.log` so manual verification can tail with `Get-Content -Wait` — `109d2a2`
 
 ### ❌ REMAINING
 
@@ -145,13 +158,25 @@ After Effects:
 - [x] Windows startup toggle
 
 **Phase 2 — Dashboard + Auto-Clean** (sliced, one commit per slice)
-- [ ] Slice 1 — Plumbing: CommunityToolkit.Mvvm + DI host, singleton DashboardWindow + DashboardViewModel, tray double-click + bolded "Open Dashboard" menu item, Hide-on-close pattern
-- [ ] Slice 2 — Disk usage bar bound read-only to DiskMonitorService
-- [ ] Slice 3 — Cache sizes per app (live, refresh on demand)
-- [ ] Slice 4 — Settings UI + SQLite persistence for threshold, Recycle Bin toggle, critical-threshold opt-in
-- [ ] Slice 5 — Cleanup history view (read-only query against CleanupLog, filter by plan)
-- [ ] Slice 6 — CleanupPlan value object + BuildPlan(); refactor CleanupService to LogPendingDeletion/UpdateDeletionResult helpers; auto-clean trigger consuming the plan
-- [ ] Slice 7 — Windows toast notifications (Review / Clean now / Snooze 1h actions)
+- [x] Slice 1 — Plumbing: CommunityToolkit.Mvvm + DI host, singleton DashboardWindow + DashboardViewModel, tray double-click + bolded "Open Dashboard" menu item, Hide-on-close pattern
+- [x] Slice 2 — Disk usage bar bound read-only to DiskMonitorService
+- [x] Slice 3 — Cache sizes per app (live, refresh on demand)
+- [x] Slice 4 — Settings UI + SQLite persistence for threshold, Recycle Bin toggle, critical-threshold opt-in
+- [x] Slice 5 — Cleanup history view (read-only query against CleanupLog)
+- [ ] Slice 6 — Auto-clean trigger (in progress)
+  - [x] 6a — CleanupPlan record + BuildPlanAsync (shared predicate)
+  - [x] 6b — Subscribe to ThresholdBreached, build plan, log only (dry-run)
+  - [ ] 6c — CleanupReviewWindow + soft-path execution (balloon → review → Clean now)
+  - [ ] 6d — Critical-path silent execution (when CriticalThresholdEnabled && free < critical)
+  - [ ] 6e — Snooze 1h respected by breach handler (adds SnoozedUntilUtc to AppSettings)
+  - [ ] 6f — TriggeredBy column on CleanupLog (Manual / SoftThreshold / CriticalThreshold)
+- [ ] Slice 7 — Windows toast notifications (richer Review / Clean now / Snooze 1h actions; Phase 1 balloon-tip is the placeholder)
+
+### 📋 Backlog (out of slice scope, captured for later)
+- Dashboard banner ("Cleanup recommended — disk at N%, click to review") so users with Focus Assist suppressing toasts still see the breach state
+- Persistent banner after critical-mode silent auto-clean if disk stays below threshold ~30 min ("cleanup completed but disk still below threshold; free other files manually")
+- Settings changes don't currently re-propagate to running services without restart (DiskMonitorService now reads fresh via `Func<AppSettings>`; other services may not)
+- Dead `ICacheLocator[] _locators` field in DiskMonitorService is unused — cleanup candidate
 
 **Phase 3 — Distribution**
 - [ ] WiX installer (.msi)
@@ -171,10 +196,11 @@ After Effects:
 
 | Field | Value |
 |-------|-------|
-| Last known clean build | 2026-05-18 — Phase 1 complete |
+| Last known clean build | 2026-05-18 — Phase 2 through Slice 6b + observability |
 | Build command | `dotnet build` |
 | Test command | `dotnet test` |
-| Last run by Claude | 2026-05-18 — 24/24 tests passing |
+| Last run by Claude | 2026-05-18 — 53/53 tests passing |
+| Log tail | `Get-Content -Wait $env:LOCALAPPDATA\SlateClean\logs\slateclean.log` |
 
 ### Current Build Errors
 ```
