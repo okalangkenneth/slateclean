@@ -10,6 +10,7 @@ public partial class DashboardViewModel : ObservableObject
 {
     private readonly Dispatcher _dispatcher;
     private readonly CacheLocator _cacheLocator;
+    private readonly CleanupHistoryService _history;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DriveLabel))]
@@ -47,18 +48,30 @@ public partial class DashboardViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(RefreshCacheSizesCommand))]
     private bool _isRefreshingCaches;
 
-    public ObservableCollection<CacheAppRow> CacheApps { get; } = new();
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RefreshHistoryCommand))]
+    private bool _isRefreshingHistory;
 
-    public DashboardViewModel(DiskMonitorService diskMonitor, CacheLocator cacheLocator)
+    public ObservableCollection<CacheAppRow> CacheApps { get; } = new();
+    public ObservableCollection<CleanupHistoryRow> RecentCleanups { get; } = new();
+
+    public DashboardViewModel(
+        DiskMonitorService diskMonitor,
+        CacheLocator cacheLocator,
+        CleanupHistoryService history,
+        CleanupService cleanupService)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _cacheLocator = cacheLocator;
+        _history = history;
         diskMonitor.DiskSpaceUpdated += OnDiskSpaceUpdated;
+        cleanupService.CleanupCompleted += OnCleanupCompleted;
 
-        // Fire-and-forget initial scan. The Task.Run inside the command keeps
-        // enumeration off the UI thread; the await continuation marshals back
-        // via the captured SynchronizationContext.
+        // Fire-and-forget initial scans. The Task.Run inside the cache command
+        // keeps enumeration off the UI thread; the await continuation marshals
+        // back via the captured SynchronizationContext.
         _ = RefreshCacheSizesCommand.ExecuteAsync(null);
+        _ = RefreshHistoryCommand.ExecuteAsync(null);
     }
 
     public string DriveLabel => DriveRoot.TrimEnd('\\');
@@ -109,6 +122,36 @@ public partial class DashboardViewModel : ObservableObject
         {
             IsRefreshingCaches = false;
         }
+    }
+
+    private bool CanRefreshHistory() => !IsRefreshingHistory;
+
+    [RelayCommand(CanExecute = nameof(CanRefreshHistory))]
+    private async Task RefreshHistoryAsync()
+    {
+        IsRefreshingHistory = true;
+        try
+        {
+            var rows = await _history.GetRecentAsync(50);
+
+            RecentCleanups.Clear();
+            foreach (var log in rows)
+            {
+                RecentCleanups.Add(new CleanupHistoryRow(log));
+            }
+        }
+        finally
+        {
+            IsRefreshingHistory = false;
+        }
+    }
+
+    private void OnCleanupCompleted(object? sender, EventArgs e)
+    {
+        // CleanupService raises this from a worker context; marshal to the UI
+        // thread before kicking off the refresh so the ObservableCollection
+        // mutation happens where WPF expects it.
+        _dispatcher.BeginInvoke(() => _ = RefreshHistoryCommand.ExecuteAsync(null));
     }
 
     private void OnDiskSpaceUpdated(object? sender, DiskSpaceUpdatedEventArgs e)

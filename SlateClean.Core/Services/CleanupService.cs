@@ -125,6 +125,10 @@ public class CleanupService
         return log;
     }
 
+    // Raised after a CleanAllAsync run completes. Subscribers can refresh
+    // history views without polling the DB.
+    public event EventHandler? CleanupCompleted;
+
     public async Task<IEnumerable<CleanupLog>> CleanAllAsync()
     {
         var results = new List<CleanupLog>(_locators.Length);
@@ -132,6 +136,7 @@ public class CleanupService
         {
             results.Add(await CleanAsync(locator));
         }
+        CleanupCompleted?.Invoke(this, EventArgs.Empty);
         return results;
     }
 

@@ -58,6 +58,7 @@ public partial class App : System.Windows.Application
 
         services.AddSingleton<CacheLocator>();
         services.AddSingleton<CleanupService>();
+        services.AddSingleton<CleanupHistoryService>();
         services.AddSingleton<DiskMonitorService>();
         services.AddSingleton<StartupService>();
         services.AddSingleton<SettingsRepository>();

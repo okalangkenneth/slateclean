@@ -30,7 +30,10 @@ internal sealed class DashboardWindowStubViewModel
         new CacheAppRow("After Effects", 0),
     };
 
+    public ObservableCollection<CleanupHistoryRow> RecentCleanups { get; } = new();
+
     public ICommand RefreshCacheSizesCommand { get; } = new NoopCommand();
+    public ICommand RefreshHistoryCommand { get; } = new NoopCommand();
 
     private sealed class NoopCommand : ICommand
     {
