@@ -27,7 +27,7 @@
                                FontSize="14" FontWeight="SemiBold"
                                Foreground="#374151">
                         <Run Text="Drive "/>
-                        <Run Text="{Binding DriveLabel}"/>
+                        <Run Text="{Binding DriveLabel, Mode=OneWay}"/>
                     </TextBlock>
                     <TextBlock HorizontalAlignment="Right"
                                FontSize="12"
