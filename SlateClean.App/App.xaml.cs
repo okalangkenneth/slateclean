@@ -35,6 +35,11 @@ public partial class App : System.Windows.Application
         var tray = _host.Services.GetRequiredService<TrayIconManager>();
         tray.Show();
 
+        // Resolve the coordinator before starting the monitor so its subscription
+        // is in place by the time the first Poll fires (which happens on Start
+        // since the timer's due-time is TimeSpan.Zero).
+        _host.Services.GetRequiredService<AutoCleanCoordinator>();
+
         _diskMonitor = _host.Services.GetRequiredService<DiskMonitorService>();
         await _diskMonitor.StartAsync();
     }
@@ -59,9 +64,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<CacheLocator>();
         services.AddSingleton<CleanupService>();
         services.AddSingleton<CleanupHistoryService>();
-        services.AddSingleton<DiskMonitorService>();
+        services.AddSingleton<DiskMonitorService>(sp => new DiskMonitorService(
+            sp.GetRequiredService<ICacheLocator[]>(),
+            () => sp.GetRequiredService<SettingsRepository>().Load(),
+            sp.GetRequiredService<ILogger<DiskMonitorService>>()));
         services.AddSingleton<StartupService>();
         services.AddSingleton<SettingsRepository>();
+        services.AddSingleton<AutoCleanCoordinator>();
 
         // ViewModels and Windows — singletons so window state and VM state
         // persist across hide/show cycles.
