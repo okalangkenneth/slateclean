@@ -100,6 +100,101 @@ public class CleanupService
         return results;
     }
 
+    // Executes a previously-built plan verbatim. Critical safety property:
+    // we do not re-enumerate the file system here — we delete exactly what
+    // the user reviewed and approved. Files added to the cache after the
+    // plan was built are not touched by this call.
+    //
+    // Files that have already been removed between plan build and execute
+    // (e.g. the app itself cleaned up a temp file) are logged at Information
+    // level and counted as skipped, not as failures.
+    public async Task<IReadOnlyList<CleanupLog>> ExecutePlanAsync(CleanupPlan plan)
+    {
+        var logs = new List<CleanupLog>(plan.Apps.Count);
+        foreach (var app in plan.Apps)
+        {
+            var log = new CleanupLog
+            {
+                AppName = app.AppName,
+                DirectoryPath = string.Join(";", app.Files
+                    .Select(f => Path.GetDirectoryName(f.Path))
+                    .Where(d => !string.IsNullOrEmpty(d))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)),
+                TimestampUtc = _utcNow(),
+                FilesDeleted = 0,
+                BytesFreed = 0,
+                Success = false,
+            };
+            _db.CleanupLogs.Add(log);
+            await _db.SaveChangesAsync();
+
+            int deleted = 0;
+            long bytes = 0;
+            int skipped = 0;
+            try
+            {
+                // Bulk synchronous IO off the UI thread; the UI marshals back
+                // via the awaiting context for the SaveChangesAsync below.
+                (deleted, bytes, skipped) = await Task.Run(() =>
+                {
+                    int d = 0; long b = 0; int s = 0;
+                    foreach (var pf in app.Files)
+                    {
+                        try
+                        {
+                            _deleter.Delete(pf.Path);
+                            d++;
+                            b += pf.SizeBytes;
+                            _logger.LogInformation(
+                                "[Cleanup] {App}: deleted {Path} ({Bytes} bytes) plan={PlanId}",
+                                app.AppName, pf.Path, pf.SizeBytes, plan.PlanId);
+                        }
+                        catch (FileNotFoundException)
+                        {
+                            s++;
+                            _logger.LogInformation(
+                                "[Cleanup] {App}: file no longer present, skipping {Path}",
+                                app.AppName, pf.Path);
+                        }
+                        catch (DirectoryNotFoundException)
+                        {
+                            s++;
+                            _logger.LogInformation(
+                                "[Cleanup] {App}: parent directory no longer present, skipping {Path}",
+                                app.AppName, pf.Path);
+                        }
+                    }
+                    return (d, b, s);
+                });
+
+                log.FilesDeleted = deleted;
+                log.BytesFreed = bytes;
+                log.Success = true;
+                _logger.LogInformation(
+                    "[Cleanup] {App}: plan {PlanId} executed — deleted {Deleted}, skipped {Skipped}, {Bytes} bytes",
+                    app.AppName, plan.PlanId, deleted, skipped, bytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Cleanup] {App}: plan {PlanId} execution failed", app.AppName, plan.PlanId);
+                log.FilesDeleted = deleted;
+                log.BytesFreed = bytes;
+                log.Success = false;
+                log.ErrorMessage = ex.Message;
+            }
+
+            try { await _db.SaveChangesAsync(); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Cleanup] {App}: failed to persist log update", app.AppName);
+            }
+            logs.Add(log);
+        }
+
+        CleanupCompleted?.Invoke(this, EventArgs.Empty);
+        return logs;
+    }
+
     // Dry-run preview shared with the executor — same predicate, no deletion,
     // no DB writes. The Review UI binds against the returned plan; the
     // auto-clean coordinator uses it to decide whether to prompt or silently

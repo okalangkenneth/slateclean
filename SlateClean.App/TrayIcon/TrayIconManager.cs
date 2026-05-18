@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Windows;
 using Microsoft.Extensions.Logging;
-using SlateClean.Core.Services;
+using SlateClean.App.ViewModels;
 using SlateClean.App.Views;
+using SlateClean.Core.Models;
+using SlateClean.Core.Services;
 using WinForms = System.Windows.Forms;
 
 namespace SlateClean.App.TrayIcon;
@@ -16,9 +18,13 @@ public class TrayIconManager : IDisposable
     private readonly StartupService _startupService;
     private readonly DashboardWindow _dashboard;
     private readonly SettingsWindow _settings;
+    private readonly CleanupReviewWindow _reviewWindow;
+    private readonly CleanupReviewViewModel _reviewVm;
+    private readonly AutoCleanCoordinator _coordinator;
     private readonly ILogger<TrayIconManager> _logger;
     private readonly WinForms.NotifyIcon _notifyIcon;
     private readonly WinForms.ToolStripMenuItem _startupItem;
+    private CleanupPlan? _pendingPlan;
 
     public TrayIconManager(
         CacheLocator cacheLocator,
@@ -27,6 +33,9 @@ public class TrayIconManager : IDisposable
         StartupService startupService,
         DashboardWindow dashboard,
         SettingsWindow settings,
+        CleanupReviewWindow reviewWindow,
+        CleanupReviewViewModel reviewVm,
+        AutoCleanCoordinator coordinator,
         ILogger<TrayIconManager> logger)
     {
         _cacheLocator = cacheLocator;
@@ -35,6 +44,9 @@ public class TrayIconManager : IDisposable
         _startupService = startupService;
         _dashboard = dashboard;
         _settings = settings;
+        _reviewWindow = reviewWindow;
+        _reviewVm = reviewVm;
+        _coordinator = coordinator;
         _logger = logger;
 
         _notifyIcon = new WinForms.NotifyIcon
@@ -68,8 +80,10 @@ public class TrayIconManager : IDisposable
 
         _notifyIcon.ContextMenuStrip = menu;
         _notifyIcon.DoubleClick += OnOpenDashboard;
+        _notifyIcon.BalloonTipClicked += OnReviewBalloonClicked;
 
         _diskMonitor.DiskThresholdBreached += OnThresholdBreached;
+        _coordinator.PlanBuilt += OnPlanBuilt;
     }
 
     public void Show()
@@ -144,6 +158,49 @@ public class TrayIconManager : IDisposable
         }
     }
 
+    // Soft-tier PlanBuilt → tray balloon "review proposed cleanup". Clicking
+    // the balloon opens the review window. Critical tier stays log-only here;
+    // it gets silent execution wiring in slice 6d.
+    private void OnPlanBuilt(object? sender, CleanupPlan plan)
+    {
+        if (plan.Tier != BreachTier.SoftThreshold) return;
+        if (plan.TotalFiles == 0)
+        {
+            _logger.LogInformation("[Tray] Soft breach but no eligible files — suppressing review prompt");
+            return;
+        }
+
+        _pendingPlan = plan;
+        var gb = plan.TotalBytes / 1024.0 / 1024.0 / 1024.0;
+        _notifyIcon.ShowBalloonTip(
+            10000,
+            "SlateClean — Cleanup recommended",
+            $"{plan.TotalFiles} files ({gb:F2} GB) eligible. Click to review.",
+            WinForms.ToolTipIcon.Info);
+    }
+
+    private void OnReviewBalloonClicked(object? sender, EventArgs e)
+    {
+        var plan = _pendingPlan;
+        if (plan is null) return;
+        _pendingPlan = null;
+
+        // PlanBuilt fires on a worker thread; the balloon callback should be on
+        // the UI thread already, but marshal explicitly to be safe before
+        // touching WPF state.
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            _reviewVm.Load(plan);
+            if (!_reviewWindow.IsVisible) _reviewWindow.Show();
+            if (_reviewWindow.WindowState == WindowState.Minimized)
+                _reviewWindow.WindowState = WindowState.Normal;
+            _reviewWindow.Activate();
+            _reviewWindow.Topmost = true;
+            _reviewWindow.Topmost = false;
+            _reviewWindow.Focus();
+        });
+    }
+
     private void OnThresholdBreached(object? sender, DiskThresholdBreachedEventArgs e)
     {
         var freeGb = e.FreeBytes / 1024.0 / 1024.0 / 1024.0;
@@ -182,6 +239,7 @@ public class TrayIconManager : IDisposable
     public void Dispose()
     {
         _diskMonitor.DiskThresholdBreached -= OnThresholdBreached;
+        _coordinator.PlanBuilt -= OnPlanBuilt;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
     }

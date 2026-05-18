@@ -94,6 +94,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<DashboardWindow>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<SettingsWindow>();
+        services.AddSingleton<CleanupReviewViewModel>();
+        services.AddSingleton<CleanupReviewWindow>();
 
         // Tray must be singleton — only one icon in the notification area.
         services.AddSingleton<TrayIconManager>();

@@ -1,0 +1,153 @@
+<Window x:Class="SlateClean.App.Views.CleanupReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SlateClean — Review cleanup"
+        Height="640" Width="760"
+        MinHeight="480" MinWidth="600"
+        WindowStartupLocation="CenterScreen"
+        Background="#f9fafb">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="Review cleanup"
+                       FontSize="22" FontWeight="SemiBold"
+                       Foreground="#111827"/>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="{Binding TierDisplay, Mode=OneWay}"
+                           FontSize="12" Foreground="#6b7280"/>
+                <TextBlock Text=" · plan "
+                           FontSize="12" Foreground="#9ca3af"/>
+                <TextBlock Text="{Binding PlanIdDisplay, Mode=OneWay}"
+                           FontSize="12" FontFamily="Consolas"
+                           Foreground="#9ca3af"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Totals + per-app summary -->
+        <Border Grid.Row="1"
+                Background="White"
+                BorderBrush="#e5e7eb" BorderThickness="1"
+                CornerRadius="8" Padding="18"
+                Margin="0,0,0,14">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <TextBlock HorizontalAlignment="Left"
+                               Text="Proposed deletion"
+                               FontSize="13" FontWeight="SemiBold"
+                               Foreground="#374151"/>
+                    <TextBlock HorizontalAlignment="Right"
+                               Text="{Binding TotalsDisplay, Mode=OneWay}"
+                               FontSize="13" FontWeight="SemiBold"
+                               Foreground="#111827"/>
+                </Grid>
+
+                <ItemsControl ItemsSource="{Binding AppRows}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="100"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding AppName}"
+                                           FontSize="12" Foreground="#111827"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding SummaryDisplay}"
+                                           FontSize="12" Foreground="#6b7280"
+                                           HorizontalAlignment="Right"/>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding SizeDisplay}"
+                                           FontSize="12" FontFamily="Consolas"
+                                           Foreground="#374151"
+                                           HorizontalAlignment="Right"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <!-- Full file list -->
+        <Border Grid.Row="2"
+                Background="White"
+                BorderBrush="#e5e7eb" BorderThickness="1"
+                CornerRadius="8" Padding="0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0"
+                           Text="Files"
+                           FontSize="13" FontWeight="SemiBold"
+                           Foreground="#374151"
+                           Margin="18,16,18,8"/>
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="18,0,18,16">
+                    <ItemsControl ItemsSource="{Binding FileRows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="90"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding AppName}"
+                                               FontSize="11" Foreground="#9ca3af"/>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Path}"
+                                               FontSize="11" FontFamily="Consolas"
+                                               Foreground="#374151"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Path}"/>
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding SizeDisplay}"
+                                               FontSize="11" FontFamily="Consolas"
+                                               Foreground="#374151"
+                                               HorizontalAlignment="Right"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Footer: status + buttons -->
+        <Grid Grid.Row="3" Margin="0,16,0,0">
+            <TextBlock HorizontalAlignment="Left"
+                       VerticalAlignment="Center"
+                       Text="{Binding StatusDisplay, Mode=OneWay}"
+                       FontSize="12" Foreground="#6b7280"/>
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                <Button Content="Snooze 1h"
+                        Command="{Binding Snooze1hCommand}"
+                        ToolTip="{Binding SnoozeTooltip, Mode=OneWay}"
+                        Width="100" Padding="0,6"
+                        Margin="0,0,8,0"/>
+                <Button Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Width="90" Padding="0,6"
+                        Margin="0,0,8,0"/>
+                <Button Content="Clean now"
+                        Command="{Binding CleanNowCommand}"
+                        Width="110" Padding="0,6"
+                        Background="#3b82f6" Foreground="White"
+                        BorderBrush="#3b82f6"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
