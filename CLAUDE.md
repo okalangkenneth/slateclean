@@ -58,8 +58,9 @@ SlateClean/
 │   │   └── AfterEffectsCacheLocator.cs
 │   ├── Services/
 │   │   ├── DiskMonitorService.cs  # Polls free space every 60s
-│   │   ├── CleanupService.cs      # Safe deletion logic
-│   │   └── CleanupLogger.cs       # Writes to SQLite before deleting
+│   │   ├── CleanupService.cs      # Safe deletion logic + SQLite logging
+│   │   ├── IFileDeleter.cs        # Seam for testing deletion (real vs fake)
+│   │   └── StartupService.cs      # Windows "Run at startup" registry toggle
 │   ├── Models/
 │   │   ├── CacheLocation.cs
 │   │   ├── CleanupLog.cs
@@ -113,36 +114,44 @@ After Effects:
 
 **Claude Code: Update this section at the end of every session.**
 
-### ✅ COMPLETED
+### ✅ COMPLETED (Phase 1)
+- Solution scaffold — `SlateClean.Core`, `SlateClean.App`, `SlateClean.Tests`
 - CleanupLog model — `SlateClean.Core/Models/CleanupLog.cs`
 - AppSettings model — `SlateClean.Core/Models/AppSettings.cs`
 - SlateCleanDbContext with SQLite — `SlateClean.Core/Data/SlateCleanDbContext.cs`
-- DiskMonitorService with 60s polling and 5-min throttle — `SlateClean.Core/Services/DiskMonitorService.cs`
-- 20 xUnit tests — all passing
+- Cache locators (DaVinci, Premiere, AE) + base class — `SlateClean.Core/CacheLocations/`
+- CacheLocator aggregator with size calculation — `SlateClean.Core/Services/CacheLocator.cs`
+- DiskMonitorService (60s polling, 5-min throttle) — `SlateClean.Core/Services/DiskMonitorService.cs`
+- CleanupService with safe deletion + SQLite logging — `SlateClean.Core/Services/CleanupService.cs`
+- IFileDeleter seam for testable deletion — `SlateClean.Core/Services/IFileDeleter.cs`
+- StartupService (Windows registry "run at startup") — `SlateClean.Core/Services/StartupService.cs`
+- TrayIconManager with right-click menu, Clear Now (aggregate), double-click → dashboard, startup toggle — `SlateClean.App/TrayIcon/TrayIconManager.cs`
+- 24 xUnit tests — all passing
 
 ### 🔨 IN PROGRESS
 <!-- Current work -->
 
 ### ❌ REMAINING
 
-**Phase 1 — Core Engine**
-- [ ] Solution scaffold (3 projects)
-- [ ] CacheLocator per app (DaVinci, Premiere, AE)
-- [ ] Cache size calculation
+**Phase 1 — Core Engine** (all done — keep for history)
+- [x] Solution scaffold (3 projects)
+- [x] CacheLocator per app (DaVinci, Premiere, AE)
+- [x] Cache size calculation
 - [x] DiskMonitorService (60s polling)
-- [ ] CleanupService with safe deletion
+- [x] CleanupService with safe deletion
 - [x] SQLite logging via EF Core
-- [ ] System tray icon + right-click menu
-- [ ] Manual "Clear Now" per app from tray menu
-- [ ] Windows startup toggle
+- [x] System tray icon + right-click menu
+- [x] Manual "Clear Now" from tray menu (aggregate — per-app variant deferred)
+- [x] Windows startup toggle
 
-**Phase 2 — Dashboard + Auto-Clean**
-- [ ] WPF dashboard window (cache sizes per app, disk usage bar)
-- [ ] Threshold setting (auto-clean when free space below X GB)
-- [ ] Auto-clean trigger on threshold breach
-- [ ] Windows toast notifications
-- [ ] Settings persistence (SQLite)
-- [ ] Cleanup history view
+**Phase 2 — Dashboard + Auto-Clean** (sliced, one commit per slice)
+- [ ] Slice 1 — Plumbing: CommunityToolkit.Mvvm + DI host, singleton DashboardWindow + DashboardViewModel, tray double-click + bolded "Open Dashboard" menu item, Hide-on-close pattern
+- [ ] Slice 2 — Disk usage bar bound read-only to DiskMonitorService
+- [ ] Slice 3 — Cache sizes per app (live, refresh on demand)
+- [ ] Slice 4 — Settings UI + SQLite persistence for threshold, Recycle Bin toggle, critical-threshold opt-in
+- [ ] Slice 5 — Cleanup history view (read-only query against CleanupLog, filter by plan)
+- [ ] Slice 6 — CleanupPlan value object + BuildPlan(); refactor CleanupService to LogPendingDeletion/UpdateDeletionResult helpers; auto-clean trigger consuming the plan
+- [ ] Slice 7 — Windows toast notifications (Review / Clean now / Snooze 1h actions)
 
 **Phase 3 — Distribution**
 - [ ] WiX installer (.msi)
@@ -162,14 +171,14 @@ After Effects:
 
 | Field | Value |
 |-------|-------|
-| Last known clean build | — |
+| Last known clean build | 2026-05-18 — Phase 1 complete |
 | Build command | `dotnet build` |
 | Test command | `dotnet test` |
-| Last run by Claude | — |
+| Last run by Claude | 2026-05-18 — 24/24 tests passing |
 
 ### Current Build Errors
 ```
-None — greenfield project
+None
 ```
 
 ### Current Warnings
@@ -237,11 +246,80 @@ IF ANY DOUBT — skip the file and log a warning. Never guess.
 ```csharp
 // 1. Verify path is within an allowed cache directory
 // 2. Check file was not modified in the last 24 hours
-// 3. Log to SQLite (path, size, timestamp, app name)
-// 4. Delete
+// 3. Log to SQLite (path, size, timestamp, app name, planId) — LogPendingDeletion
+// 4. Delete via IFileDeleter (real or Recycle Bin, per setting)
 // 5. Verify deletion succeeded
-// 6. Update log entry with result
+// 6. Update log entry with result — UpdateDeletionResult
 ```
+
+> Logging lives inside `CleanupService` deliberately — splitting it into a
+> separate `CleanupLogger` would allow the deletion step to be called without
+> the log step, which the safety rules forbid. The `IFileDeleter` seam already
+> provides the testability needed (assert log row exists in SQLite at the
+> moment `IFileDeleter.Delete` is called).
+
+---
+
+## Deletion Policy
+
+**Default:** permanent delete. Media cache routinely hits 50–500 GB; Recycle
+Bin defaults defeat the entire app. The SQLite `CleanupLog` table is the audit
+trail, not the Recycle Bin.
+
+**Opt-in:** Settings toggle "Send to Recycle Bin instead". Implemented as a
+second `IFileDeleter` implementation (`RecycleBinFileDeleter`) using
+`Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile` with the recycle option.
+The deleter implementation is resolved per cleanup operation from
+`AppSettings.UseRecycleBin`.
+
+---
+
+## Auto-Clean Tier Model
+
+Three tiers gate when deletion actually fires. The free/paid split is enforced
+in `CleanupService` and the dashboard hides paid controls for free users.
+
+| Tier | Trigger | Free | Paid (default) |
+|------|---------|------|----------------|
+| Manual clear | User clicks Clear Now from tray or dashboard | ✅ | ✅ |
+| Soft threshold | Free space drops below user-set threshold → toast prompt | ❌ | ✅ ON |
+| Critical threshold | Free space drops below critical % → silent auto-clean | ❌ | ❌ OFF (opt-in) |
+
+**Soft-threshold flow:** breach event → `CleanupService.BuildPlan()` →
+toast "Disk at 91%. 4.2 GB ready to clean." with Review / Clean now / Snooze 1h
+actions. Review opens dashboard with the plan pre-selected. Snooze writes
+`AppSettings.SnoozedUntil`.
+
+**Critical-threshold flow:** same `BuildPlan()`, no toast gate, deletion runs
+immediately. Toast fires AFTER reporting what was freed.
+
+**Critical toggle audit:** When the user enables critical-threshold silent
+auto-clean, log the setting change itself to SQLite as a `SettingChanged` row
+(or equivalent). Required for the "I never enabled that!" complaint that will
+arrive eventually.
+
+---
+
+## CleanupPlan — Shared Audit Unit
+
+Both the soft-threshold toast review and the silent critical path consume the
+same `CleanupPlan` produced by `CleanupService.BuildPlan()`. This guarantees
+identical safety rules (24-hour exclusion, known-paths-only) regardless of
+entry point.
+
+```csharp
+public record CleanupPlan(
+    Guid PlanId,
+    IReadOnlyList<PlannedDeletion> Files,
+    long TotalBytes,
+    BreachReason Reason,         // ManualClear, SoftThreshold, CriticalThreshold
+    DateTimeOffset CreatedAt,
+    int ThresholdTierPercent);   // The % that triggered it (e.g. 90, 98)
+```
+
+Every `CleanupLog` row stores the `PlanId` it belongs to. From a single plan
+ID you can reconstruct exactly which breach event caused which deletions —
+the plan IS the audit unit.
 
 ---
 
