@@ -48,58 +48,18 @@ public class CleanupService
 
         try
         {
-            var allowedRoots = directories
-                .Select(d => NormalizeRoot(d.FullName))
-                .ToArray();
-
-            var cutoffUtc = _utcNow() - MinFileAge;
+            var planned = EnumerateEligibleFiles(locator, _utcNow());
             int filesDeleted = 0;
             long bytesFreed = 0;
 
-            foreach (var dir in directories)
+            foreach (var pf in planned)
             {
-                if (!dir.Exists)
-                {
-                    _logger.LogDebug("[Cleanup] {App}: directory missing, skipping {Dir}",
-                        locator.AppName, dir.FullName);
-                    continue;
-                }
-
-                foreach (var file in dir.EnumerateFiles("*", SearchOption.AllDirectories))
-                {
-                    var fullPath = file.FullName;
-
-                    if (!allowedRoots.Any(r =>
-                        fullPath.StartsWith(r, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        _logger.LogWarning(
-                            "[Cleanup] {App}: refusing path outside cache roots: {Path}",
-                            locator.AppName, fullPath);
-                        continue;
-                    }
-
-                    if (file.LastWriteTimeUtc > cutoffUtc)
-                    {
-                        _logger.LogDebug(
-                            "[Cleanup] {App}: skipping recently modified file: {Path}",
-                            locator.AppName, fullPath);
-                        continue;
-                    }
-
-                    long size = 0;
-                    try { size = file.Length; }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "[Cleanup] Could not read size of {Path}", fullPath);
-                    }
-
-                    _deleter.Delete(fullPath);
-                    filesDeleted++;
-                    bytesFreed += size;
-                    _logger.LogInformation(
-                        "[Cleanup] {App}: deleted {Path} ({Bytes} bytes)",
-                        locator.AppName, fullPath, size);
-                }
+                _deleter.Delete(pf.Path);
+                filesDeleted++;
+                bytesFreed += pf.SizeBytes;
+                _logger.LogInformation(
+                    "[Cleanup] {App}: deleted {Path} ({Bytes} bytes)",
+                    locator.AppName, pf.Path, pf.SizeBytes);
             }
 
             log.FilesDeleted = filesDeleted;
@@ -138,6 +98,84 @@ public class CleanupService
         }
         CleanupCompleted?.Invoke(this, EventArgs.Empty);
         return results;
+    }
+
+    // Dry-run preview shared with the executor — same predicate, no deletion,
+    // no DB writes. The Review UI binds against the returned plan; the
+    // auto-clean coordinator uses it to decide whether to prompt or silently
+    // execute. PlanId stamps each build so logs can later cross-reference.
+    public Task<CleanupPlan> BuildPlanAsync(BreachTier tier)
+    {
+        return Task.Run(() =>
+        {
+            var now = _utcNow();
+            var apps = new List<PlannedAppCleanup>(_locators.Length);
+            foreach (var locator in _locators)
+            {
+                var files = EnumerateEligibleFiles(locator, now);
+                apps.Add(new PlannedAppCleanup(locator.AppName, files));
+            }
+            return new CleanupPlan(Guid.NewGuid(), now, tier, apps);
+        });
+    }
+
+    // The single source of truth for "is this file eligible for deletion".
+    // Both BuildPlanAsync (preview) and CleanAsync (execute) flow through
+    // here, so the dry-run shown to the user is exactly what gets deleted.
+    // Encodes the non-negotiable safety rules:
+    //   - file must live under a known cache directory root
+    //   - file must not have been modified in the last 24 hours
+    private IReadOnlyList<PlannedFileDeletion> EnumerateEligibleFiles(
+        ICacheLocator locator, DateTime utcNow)
+    {
+        var directories = locator.GetCacheDirectories().ToList();
+        var allowedRoots = directories
+            .Select(d => NormalizeRoot(d.FullName))
+            .ToArray();
+        var cutoffUtc = utcNow - MinFileAge;
+        var result = new List<PlannedFileDeletion>();
+
+        foreach (var dir in directories)
+        {
+            if (!dir.Exists)
+            {
+                _logger.LogDebug("[Cleanup] {App}: directory missing, skipping {Dir}",
+                    locator.AppName, dir.FullName);
+                continue;
+            }
+
+            foreach (var file in dir.EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                var fullPath = file.FullName;
+
+                if (!allowedRoots.Any(r =>
+                    fullPath.StartsWith(r, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _logger.LogWarning(
+                        "[Cleanup] {App}: refusing path outside cache roots: {Path}",
+                        locator.AppName, fullPath);
+                    continue;
+                }
+
+                if (file.LastWriteTimeUtc > cutoffUtc)
+                {
+                    _logger.LogDebug(
+                        "[Cleanup] {App}: skipping recently modified file: {Path}",
+                        locator.AppName, fullPath);
+                    continue;
+                }
+
+                long size = 0;
+                try { size = file.Length; }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[Cleanup] Could not read size of {Path}", fullPath);
+                }
+
+                result.Add(new PlannedFileDeletion(fullPath, size, file.LastWriteTimeUtc));
+            }
+        }
+        return result;
     }
 
     private static string NormalizeRoot(string path)
