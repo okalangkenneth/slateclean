@@ -153,6 +153,9 @@ public class TrayIconManager : IDisposable
 
     private void OnExit(object? sender, EventArgs e)
     {
+        // Hide the icon synchronously BEFORE Shutdown() so it cannot ghost
+        // in the tray while the async OnExit handler unwinds the Host.
+        _notifyIcon.Visible = false;
         System.Windows.Application.Current.Shutdown();
     }
 
