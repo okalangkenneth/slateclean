@@ -2,6 +2,7 @@ using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SlateClean.App.Logging;
 using SlateClean.App.TrayIcon;
 using SlateClean.App.ViewModels;
 using SlateClean.App.Views;
@@ -46,7 +47,22 @@ public partial class App : System.Windows.Application
 
     private static void ConfigureServices(IServiceCollection services)
     {
-        services.AddLogging(builder => builder.AddDebug());
+        services.AddLogging(builder =>
+        {
+            // WinExe processes have no console attached when launched from a
+            // terminal, so AddSimpleConsole on its own is invisible. The file
+            // provider mirrors all Information+ lines to
+            // %LocalAppData%/SlateClean/logs/slateclean.log so manual
+            // verification can tail with `Get-Content -Wait`.
+            builder.AddDebug();
+            builder.AddSimpleConsole(opts =>
+            {
+                opts.SingleLine = true;
+                opts.TimestampFormat = "HH:mm:ss ";
+            });
+            builder.AddProvider(new FileLoggerProvider());
+            builder.SetMinimumLevel(LogLevel.Information);
+        });
 
         // Core — SQLite context as singleton so all services share state.
         services.AddSingleton<SlateCleanDbContext>(_ => new SlateCleanDbContext());
