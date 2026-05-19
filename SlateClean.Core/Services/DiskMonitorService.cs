@@ -113,6 +113,21 @@ public class DiskMonitorService : IDisposable
 
         if (tier is null) return;
 
+        // Snooze filter — soft tier only. The user's [Snooze 1h] click is a
+        // UX-interruption defer for the prompt path; critical breaches are
+        // the dangerous path and must NOT be subject to it. Filter order is
+        // snooze → hysteresis → throttle → emit, with snooze outermost
+        // because it represents an explicit user signal.
+        if (tier == BreachTier.SoftThreshold
+            && settings.SnoozedUntilUtc is { } snoozedUntil
+            && snoozedUntil > observedAt)
+        {
+            _logger.LogInformation(
+                "[DiskMonitor] Soft breach suppressed — snoozed until {SnoozedUntilUtc:o}",
+                snoozedUntil);
+            return;
+        }
+
         // Shared 5-min throttle across tiers. Pairs with hysteresis: even rapid
         // above→below oscillations cannot fire more than once per 5 minutes.
         lock (_gate)

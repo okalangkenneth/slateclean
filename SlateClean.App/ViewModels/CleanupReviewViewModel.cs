@@ -10,7 +10,9 @@ namespace SlateClean.App.ViewModels;
 public partial class CleanupReviewViewModel : ObservableObject
 {
     private readonly CleanupService _cleanup;
+    private readonly SettingsRepository _settings;
     private readonly ILogger<CleanupReviewViewModel> _logger;
+    private readonly Func<DateTime> _utcNow;
     private CleanupPlan? _plan;
 
     [ObservableProperty] private string _planIdDisplay = "—";
@@ -20,21 +22,24 @@ public partial class CleanupReviewViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CleanNowCommand))]
+    [NotifyCanExecuteChangedFor(nameof(Snooze1hCommand))]
     private bool _isExecuting;
 
     public ObservableCollection<ReviewAppRow> AppRows { get; } = new();
     public ObservableCollection<ReviewFileRow> FileRows { get; } = new();
 
-    // Snooze 1h is intentionally always-disabled in this slice. Layout is
-    // locked in so the button does not move when slice 6e wires it up.
-    public string SnoozeTooltip => "Snooze coming in a later update";
+    public string SnoozeTooltip => "Defer this prompt for 1 hour. Critical-threshold breaches still fire silently.";
 
     public CleanupReviewViewModel(
         CleanupService cleanup,
-        ILogger<CleanupReviewViewModel> logger)
+        SettingsRepository settings,
+        ILogger<CleanupReviewViewModel> logger,
+        Func<DateTime>? utcNow = null)
     {
         _cleanup = cleanup;
+        _settings = settings;
         _logger = logger;
+        _utcNow = utcNow ?? (() => DateTime.UtcNow);
     }
 
     public event EventHandler? RequestClose;
@@ -66,10 +71,11 @@ public partial class CleanupReviewViewModel : ObservableObject
             }
         }
 
-        // CleanNow's CanExecute depends on _plan, which is a plain field — no
-        // auto-notify. Re-evaluate after the plan is wired up; otherwise the
-        // button stays stuck in its initial (disabled) state.
+        // CleanNow + Snooze1h CanExecute depends on _plan (a plain field) —
+        // no auto-notify. Re-evaluate after the plan is wired up; otherwise
+        // the buttons stay stuck in their initial (disabled) state.
         CleanNowCommand.NotifyCanExecuteChanged();
+        Snooze1hCommand.NotifyCanExecuteChanged();
     }
 
     private bool CanCleanNow() => !IsExecuting && _plan is not null && _plan.TotalFiles > 0;
@@ -102,10 +108,24 @@ public partial class CleanupReviewViewModel : ObservableObject
     [RelayCommand]
     private void Cancel() => RequestClose?.Invoke(this, EventArgs.Empty);
 
-    // Snooze is a placeholder for 6e. CanExecute is always false here so the
-    // command never runs, but the button stays visible in the layout.
+    // Defers the soft-tier prompt for one hour by persisting SnoozedUntilUtc
+    // on AppSettings. DiskMonitorService consults that field on every poll
+    // (soft tier only — critical breaches ignore snooze and still fire
+    // silently). The 1h window expires naturally on the next poll where
+    // DateTime.UtcNow >= SnoozedUntilUtc; no background timer needed.
     [RelayCommand(CanExecute = nameof(CanSnooze))]
-    private void Snooze1h() { /* enabled in slice 6e */ }
+    private void Snooze1h()
+    {
+        var until = _utcNow().AddHours(1);
+        var settings = _settings.Load();
+        settings.SnoozedUntilUtc = until;
+        _settings.Save(settings);
+        _logger.LogInformation("[Snooze] User snoozed cleanup until {SnoozedUntilUtc:o}", until);
+        RequestClose?.Invoke(this, EventArgs.Empty);
+    }
 
-    private bool CanSnooze() => false;
+    // Snooze is enabled under the same conditions as Clean now — both are
+    // valid responses to a plan with eligible files (one executes, one
+    // defers). Cancel remains always-enabled separately.
+    private bool CanSnooze() => !IsExecuting && _plan is not null && _plan.TotalFiles > 0;
 }

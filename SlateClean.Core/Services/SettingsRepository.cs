@@ -57,6 +57,7 @@ public class SettingsRepository
         existing.SendToRecycleBin = updated.SendToRecycleBin;
         existing.CriticalThresholdEnabled = updated.CriticalThresholdEnabled;
         existing.CriticalThresholdGb = updated.CriticalThresholdGb;
+        existing.SnoozedUntilUtc = updated.SnoozedUntilUtc;
 
         if (!wasCriticalEnabled && updated.CriticalThresholdEnabled)
         {

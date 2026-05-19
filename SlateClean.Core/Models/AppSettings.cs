@@ -19,4 +19,10 @@ public class AppSettings
     // guard and known-cache-paths rule apply unconditionally in both modes.
     public bool CriticalThresholdEnabled { get; set; } = false;
     public int CriticalThresholdGb { get; set; } = 5;
+
+    // Soft-tier breach prompts are suppressed while DateTime.UtcNow is below
+    // this value. NULL means "not snoozed". Set by the [Snooze 1h] button on
+    // the Review window. Critical-tier breaches IGNORE this — snooze is a
+    // UX-interruption defer, not an override of the critical opt-in.
+    public DateTime? SnoozedUntilUtc { get; set; }
 }

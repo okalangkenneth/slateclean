@@ -42,6 +42,77 @@ public class DiskMonitorServiceTests
     private const long Gb = 1024L * 1024 * 1024;
 
     [Fact]
+    public void Poll_suppresses_soft_breach_while_snoozed()
+    {
+        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var settings = new AppSettings
+        {
+            ThresholdGb = 20,
+            SnoozedUntilUtc = now.AddMinutes(30),    // active snooze
+        };
+        var monitor = new StubMonitor(() => now, () => settings)
+        {
+            FreeBytesValue = 5 * Gb,
+        };
+        var raised = false;
+        monitor.DiskThresholdBreached += (_, _) => raised = true;
+
+        monitor.Poll();
+
+        Assert.False(raised);
+    }
+
+    [Fact]
+    public void Poll_emits_soft_breach_after_snooze_expires()
+    {
+        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var settings = new AppSettings
+        {
+            ThresholdGb = 20,
+            SnoozedUntilUtc = now.AddMinutes(-1),    // expired
+        };
+        var monitor = new StubMonitor(() => now, () => settings)
+        {
+            FreeBytesValue = 5 * Gb,
+        };
+        DiskThresholdBreachedEventArgs? received = null;
+        monitor.DiskThresholdBreached += (_, e) => received = e;
+
+        monitor.Poll();
+
+        Assert.NotNull(received);
+        Assert.Equal(BreachTier.SoftThreshold, received!.Tier);
+    }
+
+    [Fact]
+    public void Poll_emits_critical_breach_even_while_snoozed()
+    {
+        // Snooze is a UX-interruption defer for the soft-tier prompt path.
+        // Critical-tier breaches must fire regardless: the silent-execution
+        // path is the dangerous one, and the user's [Snooze 1h] click on a
+        // prior soft prompt does not override their critical opt-in.
+        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var settings = new AppSettings
+        {
+            ThresholdGb = 20,
+            CriticalThresholdEnabled = true,
+            CriticalThresholdGb = 5,
+            SnoozedUntilUtc = now.AddMinutes(30),    // active snooze
+        };
+        var monitor = new StubMonitor(() => now, () => settings)
+        {
+            FreeBytesValue = 3 * Gb,                 // below critical
+        };
+        DiskThresholdBreachedEventArgs? received = null;
+        monitor.DiskThresholdBreached += (_, e) => received = e;
+
+        monitor.Poll();
+
+        Assert.NotNull(received);
+        Assert.Equal(BreachTier.CriticalThreshold, received!.Tier);
+    }
+
+    [Fact]
     public void Poll_raises_soft_breach_when_below_soft_threshold()
     {
         var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);

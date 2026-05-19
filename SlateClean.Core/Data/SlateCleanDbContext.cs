@@ -44,6 +44,7 @@ public class SlateCleanDbContext : DbContext
         AddColumnIfMissing("Settings", "SendToRecycleBin", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("Settings", "CriticalThresholdEnabled", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing("Settings", "CriticalThresholdGb", "INTEGER NOT NULL DEFAULT 5");
+        AddColumnIfMissing("Settings", "SnoozedUntilUtc", "TEXT NULL");
 
         Database.ExecuteSqlRaw(@"
             CREATE TABLE IF NOT EXISTS SettingsAuditLogs (

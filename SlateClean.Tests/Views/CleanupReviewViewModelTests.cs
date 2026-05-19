@@ -33,10 +33,12 @@ public class CleanupReviewViewModelTests : IDisposable
         _conn.Dispose();
     }
 
-    private CleanupReviewViewModel NewVm() =>
+    private CleanupReviewViewModel NewVm(Func<DateTime>? utcNow = null) =>
         new(
             new CleanupService(Array.Empty<ICacheLocator>(), _db, NullLogger<CleanupService>.Instance),
-            NullLogger<CleanupReviewViewModel>.Instance);
+            new SettingsRepository(_db),
+            NullLogger<CleanupReviewViewModel>.Instance,
+            utcNow);
 
     [Fact]
     public void CleanNow_is_disabled_before_Load()
@@ -73,6 +75,67 @@ public class CleanupReviewViewModelTests : IDisposable
     {
         var vm = NewVm();
         Assert.True(vm.CancelCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void SnoozeAsync_persists_one_hour_defer_and_closes_window()
+    {
+        var fixedNow = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var vm = NewVm(() => fixedNow);
+        var plan = new CleanupPlan(
+            PlanId: Guid.NewGuid(),
+            BuiltAtUtc: fixedNow,
+            Tier: BreachTier.SoftThreshold,
+            Apps: new[]
+            {
+                new PlannedAppCleanup("A", new[]
+                {
+                    new PlannedFileDeletion(@"C:\fake\a.cache", 1024, fixedNow.AddDays(-2)),
+                }),
+            });
+        vm.Load(plan);
+
+        var closed = false;
+        vm.RequestClose += (_, _) => closed = true;
+
+        // CanExecute states before invoking: Cancel always on, CleanNow on
+        // (plan has files), Snooze on (same condition).
+        Assert.True(vm.CancelCommand.CanExecute(null));
+        Assert.True(vm.CleanNowCommand.CanExecute(null));
+        Assert.True(vm.Snooze1hCommand.CanExecute(null));
+
+        vm.Snooze1hCommand.Execute(null);
+
+        Assert.True(closed);
+
+        var saved = new SettingsRepository(_db).Load();
+        Assert.NotNull(saved.SnoozedUntilUtc);
+        Assert.Equal(fixedNow.AddHours(1), saved.SnoozedUntilUtc);
+
+        // Cancel CanExecute unchanged; CleanNow unchanged (plan still
+        // present and IsExecuting unchanged).
+        Assert.True(vm.CancelCommand.CanExecute(null));
+        Assert.True(vm.CleanNowCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void SnoozedUntilUtc_round_trips_through_SettingsRepository()
+    {
+        var repo = new SettingsRepository(_db);
+        var snoozeUntil = new DateTime(2026, 6, 1, 9, 30, 0, DateTimeKind.Utc);
+
+        var settings = repo.Load();
+        settings.SnoozedUntilUtc = snoozeUntil;
+        repo.Save(settings);
+
+        // Fresh context to defeat any in-memory tracking, simulating the
+        // app-restart path that 6e promises.
+        using var fresh = new SlateCleanDbContext(
+            new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<SlateCleanDbContext>()
+                .UseSqlite(_conn).Options);
+        var reloaded = new SettingsRepository(fresh).Load();
+
+        Assert.Equal(snoozeUntil, reloaded.SnoozedUntilUtc);
     }
 
     [Fact]
