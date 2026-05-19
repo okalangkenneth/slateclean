@@ -203,21 +203,15 @@ public class TrayIconManager : IDisposable
 
     private void OnThresholdBreached(object? sender, DiskThresholdBreachedEventArgs e)
     {
-        // Soft breaches are owned by AutoCleanCoordinator → PlanBuilt →
-        // OnPlanBuilt, which raises the "review proposed cleanup" balloon.
-        // Firing the generic Phase 1 balloon here too produced duplicate
-        // notifications where only one was the click target for the Review
-        // window. Critical breaches keep this generic balloon until slice 6d
-        // adds silent execution.
-        if (e.Tier == BreachTier.SoftThreshold) return;
-
-        var freeGb = e.FreeBytes / 1024.0 / 1024.0 / 1024.0;
-        var thresholdGb = e.ThresholdBytes / 1024.0 / 1024.0 / 1024.0;
-        _notifyIcon.ShowBalloonTip(
-            10000,
-            "SlateClean — Low disk space",
-            $"Free space {freeGb:F1} GB is below threshold {thresholdGb:F0} GB",
-            WinForms.ToolTipIcon.Warning);
+        // Both tiers are now owned downstream of AutoCleanCoordinator:
+        //   Soft     → PlanBuilt → OnPlanBuilt → "Cleanup recommended" balloon
+        //   Critical → silent execution (no balloon, no Review window) per
+        //              Slice 6d. A post-cleanup notification banner is
+        //              tracked as a separate backlog item.
+        // The Phase 1 generic "Low disk space" balloon is therefore dormant.
+        // Subscription is kept so future slices (e.g. a Focus-Assist banner
+        // path) can wire onto the same handler without re-plumbing events.
+        _logger.LogDebug("[Tray] Threshold breach event observed ({Tier}); no generic balloon", e.Tier);
     }
 
     private void OnOpenSettings(object? sender, EventArgs e)

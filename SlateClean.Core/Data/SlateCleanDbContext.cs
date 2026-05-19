@@ -52,6 +52,14 @@ public class SlateCleanDbContext : DbContext
                 EventType TEXT NOT NULL,
                 Details TEXT NULL
             );");
+
+        // Slice 6d — extend the audit table with CriticalFire-specific columns.
+        // Existing opt-in rows leave these NULL; CriticalFire rows populate all.
+        AddColumnIfMissing("SettingsAuditLogs", "FreeBytesAtTrigger", "INTEGER NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "CriticalThresholdGb", "INTEGER NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "PlanId", "TEXT NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "FilesDeleted", "INTEGER NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "BytesFreed", "INTEGER NULL");
     }
 
     private void AddColumnIfMissing(string table, string column, string typeDecl)

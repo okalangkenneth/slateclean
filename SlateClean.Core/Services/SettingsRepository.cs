@@ -11,6 +11,7 @@ namespace SlateClean.Core.Services;
 public class SettingsRepository
 {
     public const string AuditEventCriticalThresholdEnabled = "CriticalThresholdEnabled";
+    public const string AuditEventCriticalFire = "CriticalFire";
 
     private readonly SlateCleanDbContext _db;
 
@@ -73,5 +74,29 @@ public class SettingsRepository
             EventType = AuditEventCriticalThresholdEnabled,
             Details = $"CriticalThresholdGb={criticalThresholdGb}",
         });
+    }
+
+    // Records a critical-tier silent execution. The "I never enabled that"
+    // defense: every silent deletion leaves an explicit audit row that names
+    // the trigger conditions and the plan it consumed.
+    public void WriteCriticalFireAudit(
+        DateTime timestampUtc,
+        long freeBytesAtTrigger,
+        int criticalThresholdGb,
+        Guid planId,
+        int filesDeleted,
+        long bytesFreed)
+    {
+        _db.SettingsAuditLogs.Add(new SettingsAuditLog
+        {
+            TimestampUtc = timestampUtc,
+            EventType = AuditEventCriticalFire,
+            FreeBytesAtTrigger = freeBytesAtTrigger,
+            CriticalThresholdGb = criticalThresholdGb,
+            PlanId = planId.ToString(),
+            FilesDeleted = filesDeleted,
+            BytesFreed = bytesFreed,
+        });
+        _db.SaveChanges();
     }
 }

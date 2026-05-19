@@ -30,7 +30,7 @@ public class AutoCleanCoordinatorTests : IDisposable
         _conn.Open();
         _opts = new DbContextOptionsBuilder<SlateCleanDbContext>().UseSqlite(_conn).Options;
         using var ctx = new SlateCleanDbContext(_opts);
-        ctx.Database.EnsureCreated();
+        ctx.EnsureSchemaUpToDate();
     }
 
     public void Dispose()
@@ -91,89 +91,63 @@ public class AutoCleanCoordinatorTests : IDisposable
         }
     }
 
+    // Seeds an AppSettings row through SettingsRepository (so the audit-log
+    // side effects of opt-in are honoured) and returns a fresh repository
+    // bound to a shared in-memory database.
+    private SettingsRepository NewRepo(AppSettings seed)
+    {
+        var ctx = NewContext();
+        var repo = new SettingsRepository(ctx);
+        repo.Save(seed);
+        return repo;
+    }
+
     [Fact]
-    public void Coordinator_builds_plan_with_soft_tier_on_soft_breach()
+    public void Soft_breach_raises_PlanBuilt_and_does_not_execute()
     {
         var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
         var dir = Directory.CreateDirectory(Path.Combine(_root, "A"));
-        WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
+        var file = WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
 
         var locators = new ICacheLocator[]
         {
             new FakeLocator { AppName = "A", Directory = dir },
         };
         using var db = NewContext();
+        var deleter = new RecordingDeleter();
         var cleanup = new CleanupService(locators, db,
-            NullLogger<CleanupService>.Instance,
-            new RecordingDeleter(),
-            () => now);
+            NullLogger<CleanupService>.Instance, deleter, () => now);
 
         var settings = new AppSettings { ThresholdGb = 20 };
         var monitor = new StubMonitor(() => now, () => settings)
         {
             FreeBytesValue = 5 * Gb,
         };
-        using var coord = new AutoCleanCoordinator(monitor, cleanup,
-            NullLogger<AutoCleanCoordinator>.Instance);
+        var repo = NewRepo(settings);
+        using var coord = new AutoCleanCoordinator(monitor, cleanup, repo,
+            NullLogger<AutoCleanCoordinator>.Instance, () => now);
 
-        CleanupPlan? capturedPlan = null;
-        coord.PlanBuilt += (_, plan) => capturedPlan = plan;
+        CleanupPlan? planBuilt = null;
+        CleanupPlan? planExecuted = null;
+        coord.PlanBuilt += (_, plan) => planBuilt = plan;
+        coord.PlanExecuted += (_, plan) => planExecuted = plan;
 
         monitor.Poll();
-        SpinUntil(() => capturedPlan is not null, timeoutMs: 10000);
+        SpinUntil(() => planBuilt is not null, timeoutMs: 10000);
 
-        Assert.NotNull(capturedPlan);
-        Assert.Equal(BreachTier.SoftThreshold, capturedPlan!.Tier);
-        Assert.Equal(1, capturedPlan.TotalFiles);
-        Assert.Equal(100, capturedPlan.TotalBytes);
+        Assert.NotNull(planBuilt);
+        Assert.Equal(BreachTier.SoftThreshold, planBuilt!.Tier);
+        Assert.Null(planExecuted);                  // silent path NOT taken
+        Assert.True(File.Exists(file));             // nothing deleted yet
+        Assert.Empty(deleter.Deleted);
     }
 
     [Fact]
-    public void Coordinator_builds_plan_with_critical_tier_when_opted_in()
+    public void Soft_breach_still_uses_soft_path_when_critical_opt_in_is_enabled()
     {
         var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
         var dir = Directory.CreateDirectory(Path.Combine(_root, "A"));
-        WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
-
-        var locators = new ICacheLocator[]
-        {
-            new FakeLocator { AppName = "A", Directory = dir },
-        };
-        using var db = NewContext();
-        var cleanup = new CleanupService(locators, db,
-            NullLogger<CleanupService>.Instance,
-            new RecordingDeleter(),
-            () => now);
-
-        var settings = new AppSettings
-        {
-            ThresholdGb = 20,
-            CriticalThresholdEnabled = true,
-            CriticalThresholdGb = 5,
-        };
-        var monitor = new StubMonitor(() => now, () => settings)
-        {
-            FreeBytesValue = 3 * Gb,
-        };
-        using var coord = new AutoCleanCoordinator(monitor, cleanup,
-            NullLogger<AutoCleanCoordinator>.Instance);
-
-        CleanupPlan? capturedPlan = null;
-        coord.PlanBuilt += (_, plan) => capturedPlan = plan;
-
-        monitor.Poll();
-        SpinUntil(() => capturedPlan is not null, timeoutMs: 10000);
-
-        Assert.NotNull(capturedPlan);
-        Assert.Equal(BreachTier.CriticalThreshold, capturedPlan!.Tier);
-    }
-
-    [Fact]
-    public void Coordinator_does_not_delete_or_write_to_cleanup_logs()
-    {
-        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
-        var dir = Directory.CreateDirectory(Path.Combine(_root, "A"));
-        var oldFile = WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
+        var file = WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
 
         var locators = new ICacheLocator[]
         {
@@ -190,25 +164,148 @@ public class AutoCleanCoordinatorTests : IDisposable
             CriticalThresholdEnabled = true,
             CriticalThresholdGb = 5,
         };
+        // Free space below SOFT but above CRITICAL — must take the soft path.
         var monitor = new StubMonitor(() => now, () => settings)
         {
-            FreeBytesValue = 3 * Gb,
+            FreeBytesValue = 10 * Gb,
         };
-        using var coord = new AutoCleanCoordinator(monitor, cleanup,
-            NullLogger<AutoCleanCoordinator>.Instance);
+        var repo = NewRepo(settings);
+        using var coord = new AutoCleanCoordinator(monitor, cleanup, repo,
+            NullLogger<AutoCleanCoordinator>.Instance, () => now);
 
-        var fired = false;
-        coord.PlanBuilt += (_, _) => fired = true;
+        CleanupPlan? planBuilt = null;
+        CleanupPlan? planExecuted = null;
+        coord.PlanBuilt += (_, plan) => planBuilt = plan;
+        coord.PlanExecuted += (_, plan) => planExecuted = plan;
 
         monitor.Poll();
-        SpinUntil(() => fired, timeoutMs: 10000);
+        SpinUntil(() => planBuilt is not null, timeoutMs: 10000);
 
-        Assert.True(fired);
-        // Safety net: even on a critical-tier breach in 6b, nothing executes.
-        Assert.True(File.Exists(oldFile));
+        Assert.NotNull(planBuilt);
+        Assert.Equal(BreachTier.SoftThreshold, planBuilt!.Tier);
+        Assert.Null(planExecuted);
+        Assert.True(File.Exists(file));
         Assert.Empty(deleter.Deleted);
+    }
+
+    [Fact]
+    public async Task Critical_breach_with_opt_in_executes_silently_and_writes_audit_row()
+    {
+        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var dir = Directory.CreateDirectory(Path.Combine(_root, "A"));
+        var file = WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
+
+        var locators = new ICacheLocator[]
+        {
+            new FakeLocator { AppName = "A", Directory = dir },
+        };
+        using var db = NewContext();
+        var deleter = new RecordingDeleter();
+        var cleanup = new CleanupService(locators, db,
+            NullLogger<CleanupService>.Instance, deleter, () => now);
+
+        var settings = new AppSettings
+        {
+            ThresholdGb = 20,
+            CriticalThresholdEnabled = true,
+            CriticalThresholdGb = 5,
+        };
+        var monitor = new StubMonitor(() => now, () => settings);
+        var repo = NewRepo(settings);
+        using var coord = new AutoCleanCoordinator(monitor, cleanup, repo,
+            NullLogger<AutoCleanCoordinator>.Instance, () => now);
+
+        CleanupPlan? planBuilt = null;
+        CleanupPlan? planExecuted = null;
+        coord.PlanBuilt += (_, plan) => planBuilt = plan;
+        coord.PlanExecuted += (_, plan) => planExecuted = plan;
+
+        const long freeAtTrigger = 3L * Gb;
+        await coord.HandleBreachAsync(new DiskThresholdBreachedEventArgs(
+            freeBytes: freeAtTrigger,
+            thresholdBytes: 5L * Gb,
+            timestampUtc: now,
+            tier: BreachTier.CriticalThreshold));
+
+        // Silent path: PlanBuilt MUST NOT fire (the tray listens on it for
+        // the balloon → Review window prompt). PlanExecuted DOES fire.
+        Assert.Null(planBuilt);
+        Assert.NotNull(planExecuted);
+
+        // File actually deleted via the shared ExecutePlanAsync path.
+        Assert.False(File.Exists(file));
+        Assert.Single(deleter.Deleted);
+
+        // Per-file CleanupLog row exists.
+        using var verify = NewContext();
+        var cleanupLog = Assert.Single(verify.CleanupLogs);
+        Assert.Equal("A", cleanupLog.AppName);
+        Assert.Equal(1, cleanupLog.FilesDeleted);
+        Assert.Equal(100, cleanupLog.BytesFreed);
+        Assert.True(cleanupLog.Success);
+
+        // SettingsAuditLog row populated with every required field.
+        var audit = Assert.Single(verify.SettingsAuditLogs.Where(
+            a => a.EventType == SettingsRepository.AuditEventCriticalFire));
+        Assert.Equal(now, audit.TimestampUtc);
+        Assert.Equal(freeAtTrigger, audit.FreeBytesAtTrigger);
+        Assert.Equal(5, audit.CriticalThresholdGb);
+        Assert.Equal(planExecuted!.PlanId.ToString(), audit.PlanId);
+        Assert.Equal(1, audit.FilesDeleted);
+        Assert.Equal(100L, audit.BytesFreed);
+    }
+
+    [Fact]
+    public async Task Critical_breach_with_opt_in_disabled_is_a_no_op()
+    {
+        // Defense-in-depth: DiskMonitorService already gates critical-tier
+        // events on the opt-in, but if a critical-tier event ever reaches
+        // the coordinator with opt-in == false, it must refuse to execute.
+        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var dir = Directory.CreateDirectory(Path.Combine(_root, "A"));
+        var file = WriteFile(dir.FullName, "old.dat", now.AddDays(-2), 100);
+
+        var locators = new ICacheLocator[]
+        {
+            new FakeLocator { AppName = "A", Directory = dir },
+        };
+        using var db = NewContext();
+        var deleter = new RecordingDeleter();
+        var cleanup = new CleanupService(locators, db,
+            NullLogger<CleanupService>.Instance, deleter, () => now);
+
+        var settings = new AppSettings
+        {
+            ThresholdGb = 20,
+            CriticalThresholdEnabled = false,         // opt-in OFF
+            CriticalThresholdGb = 5,
+        };
+        var monitor = new StubMonitor(() => now, () => settings);
+        var repo = NewRepo(settings);
+        using var coord = new AutoCleanCoordinator(monitor, cleanup, repo,
+            NullLogger<AutoCleanCoordinator>.Instance, () => now);
+
+        CleanupPlan? planBuilt = null;
+        CleanupPlan? planExecuted = null;
+        coord.PlanBuilt += (_, plan) => planBuilt = plan;
+        coord.PlanExecuted += (_, plan) => planExecuted = plan;
+
+        await coord.HandleBreachAsync(new DiskThresholdBreachedEventArgs(
+            freeBytes: 3L * Gb,
+            thresholdBytes: 5L * Gb,
+            timestampUtc: now,
+            tier: BreachTier.CriticalThreshold));
+
+        // No execution, no plan, no audit, file untouched.
+        Assert.Null(planBuilt);
+        Assert.Null(planExecuted);
+        Assert.True(File.Exists(file));
+        Assert.Empty(deleter.Deleted);
+
         using var verify = NewContext();
         Assert.Empty(verify.CleanupLogs);
+        Assert.Empty(verify.SettingsAuditLogs.Where(
+            a => a.EventType == SettingsRepository.AuditEventCriticalFire));
     }
 
     [Fact]
@@ -226,10 +323,12 @@ public class AutoCleanCoordinatorTests : IDisposable
             Array.Empty<ICacheLocator>(), db,
             NullLogger<CleanupService>.Instance, new RecordingDeleter());
 
-        var coord = new AutoCleanCoordinator(monitor, cleanup,
-            NullLogger<AutoCleanCoordinator>.Instance);
+        var repo = NewRepo(settings);
+        var coord = new AutoCleanCoordinator(monitor, cleanup, repo,
+            NullLogger<AutoCleanCoordinator>.Instance, () => now);
         var fired = 0;
         coord.PlanBuilt += (_, _) => fired++;
+        coord.PlanExecuted += (_, _) => fired++;
 
         coord.Dispose();
         monitor.Poll();
