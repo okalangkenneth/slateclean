@@ -129,12 +129,9 @@ After Effects:
 - 24 xUnit tests — all passing
 
 ### 🔨 IN PROGRESS
-- Slice 6 — Auto-clean trigger. 6a + 6b + observability fix landed (full dry-run
-  pipeline runs end-to-end without deletion). 6c–6f remaining: Review window +
-  soft-path execution, critical-path silent execution, Snooze 1h, TriggeredBy
-  column on CleanupLog.
+- None — Phase 2 complete (2026-05-19). Next scope (Phase 2.1 polish vs Phase 3 distribution) pending decision.
 
-### ✅ COMPLETED (Phase 2)
+### ✅ COMPLETED (Phase 2 — fully done 2026-05-19)
 - Slice 1 — DI host + singleton DashboardWindow/VM, tray double-click, Hide-on-close — `ab9d2e8`
 - Slice 2 — Disk usage card bound to DiskMonitorService, "Last updated" timestamp — `52141ac`, `cda1234`, `2f864c0`
 - Slice 3 — Per-app cache sizes with async refresh — `1c2a8fd`, fix in `c8bb96e`
@@ -142,6 +139,10 @@ After Effects:
 - Slice 5 — Cleanup history card with auto-refresh on Clear Now via CleanupService.CleanupCompleted event — `2c0d593`
 - Slice 6a — `CleanupPlan` record + `CleanupService.BuildPlanAsync`; shared `EnumerateEligibleFiles` predicate so dry-run = execution — `e6d20a7`
 - Slice 6b — Tier-aware DiskThresholdBreached (Soft/Critical), per-tier edge-triggered hysteresis + 5-min throttle, settings-driven via `Func<AppSettings>`, AutoCleanCoordinator builds plans and logs only (no execution) — `68d10db`
+- Slice 6c — CleanupReviewWindow + soft-path execution (balloon → review → [Clean now!]). Blocker fix landed for the initial review-window non-interactivity (Load wasn't notifying CleanNowCommand.CanExecuteChanged), duplicate balloons, file-path truncation — `d5bab42`, `33ab0b1`
+- Slice 6d — Critical-tier silent execution + `CriticalFire` audit row on `SettingsAuditLogs` (extended in place with FreeBytesAtTrigger / CriticalThresholdGb / PlanId / FilesDeleted / BytesFreed columns). Same `ExecutePlanAsync` as soft path — no parallel code path — `ce7a810`
+- Slice 6e — Snooze 1h persistence via `AppSettings.SnoozedUntilUtc`; soft-tier breaches respect it, critical-tier breaches ignore it (the design-note invariant is pinned by `Poll_emits_critical_breach_even_while_snoozed`) — `7f8f198`
+- Slice 6f — `TriggeredBy` column on `CleanupLog` (`Manual` / `SoftThreshold` / `CriticalThreshold`). Migration backfills legacy rows to `Manual` via `DEFAULT 'Manual'` ALTER. Verified end-to-end against the live DB on 2026-05-19 — all three paths land the correct tier — `9271d2d`
 - Observability — FileLoggerProvider writes Information+ to `%LocalAppData%\SlateClean\logs\slateclean.log` so manual verification can tail with `Get-Content -Wait` — `109d2a2`
 
 ### ❌ REMAINING
@@ -157,26 +158,40 @@ After Effects:
 - [x] Manual "Clear Now" from tray menu (aggregate — per-app variant deferred)
 - [x] Windows startup toggle
 
-**Phase 2 — Dashboard + Auto-Clean** (sliced, one commit per slice)
+**Phase 2 — Dashboard + Auto-Clean** ✅ COMPLETE 2026-05-19
 - [x] Slice 1 — Plumbing: CommunityToolkit.Mvvm + DI host, singleton DashboardWindow + DashboardViewModel, tray double-click + bolded "Open Dashboard" menu item, Hide-on-close pattern
 - [x] Slice 2 — Disk usage bar bound read-only to DiskMonitorService
 - [x] Slice 3 — Cache sizes per app (live, refresh on demand)
 - [x] Slice 4 — Settings UI + SQLite persistence for threshold, Recycle Bin toggle, critical-threshold opt-in
 - [x] Slice 5 — Cleanup history view (read-only query against CleanupLog)
-- [ ] Slice 6 — Auto-clean trigger (in progress)
+- [x] Slice 6 — Auto-clean trigger
   - [x] 6a — CleanupPlan record + BuildPlanAsync (shared predicate)
   - [x] 6b — Subscribe to ThresholdBreached, build plan, log only (dry-run)
-  - [ ] 6c — CleanupReviewWindow + soft-path execution (balloon → review → Clean now)
-  - [ ] 6d — Critical-path silent execution (when CriticalThresholdEnabled && free < critical)
-  - [ ] 6e — Snooze 1h respected by breach handler (adds SnoozedUntilUtc to AppSettings)
-  - [ ] 6f — TriggeredBy column on CleanupLog (Manual / SoftThreshold / CriticalThreshold)
-- [ ] Slice 7 — Windows toast notifications (richer Review / Clean now / Snooze 1h actions; Phase 1 balloon-tip is the placeholder)
+  - [x] 6c — CleanupReviewWindow + soft-path execution (balloon → review → Clean now)
+  - [x] 6d — Critical-path silent execution (when CriticalThresholdEnabled && free < critical) + audit log
+  - [x] 6e — Snooze 1h respected by breach handler (adds SnoozedUntilUtc to AppSettings); soft-only
+  - [x] 6f — TriggeredBy column on CleanupLog (Manual / SoftThreshold / CriticalThreshold)
+- [ ] Slice 7 — Windows toast notifications (richer Review / Clean now / Snooze 1h actions; Phase 1 balloon-tip is the placeholder). Deferred — not required for Phase 2 functional completion.
 
-### 📋 Backlog (out of slice scope, captured for later)
-- Dashboard banner ("Cleanup recommended — disk at N%, click to review") so users with Focus Assist suppressing toasts still see the breach state
-- Persistent banner after critical-mode silent auto-clean if disk stays below threshold ~30 min ("cleanup completed but disk still below threshold; free other files manually")
-- Settings changes don't currently re-propagate to running services without restart (DiskMonitorService now reads fresh via `Func<AppSettings>`; other services may not)
-- Dead `ICacheLocator[] _locators` field in DiskMonitorService is unused — cleanup candidate
+### 📋 Backlog (post-Phase-2, grouped by intent for prioritisation)
+
+**Functional defects** (correctness bugs, fix before distribution)
+- **Hysteresis edge consumed by 5-min throttle** (discovered 2026-05-19, Slice 6f manual verification). When a breach is throttled, `DiskMonitorService` still updates `_softBelow`/`_criticalBelow` unconditionally — so the false→true edge is consumed silently and won't re-fire after the throttle expires. Repro: trigger a critical fire, then within 5 minutes change the soft threshold to provoke a soft breach. The transition is detected but suppressed by the shared throttle, and subsequent polls see no transition. User-visible: balloon never appears even after waiting out the 5 minutes. Required an app restart to recover during verification; tray "Clear Now" (which bypasses the coordinator) was the alternative escape hatch. Fix candidates:
+  1. **Option 1 — RECOMMENDED.** Defer the hysteresis state update until AFTER the throttle check, so a throttled edge stays available for the next poll. Smallest blast radius — single-line move inside `DiskMonitorService.Poll`.
+  2. Per-tier throttle instead of shared. More work; also closes the cross-tier suppression case (currently a critical fire suppresses any soft fire within 5 minutes and vice versa).
+  3. Track `_lastEmittedAt` per tier and re-emit on the first eligible poll after throttle expires if still below.
+- **`SendToRecycleBin` persisted but not honored.** The setting is read/written via `SettingsRepository` and shown in the Settings UI, but `CleanupService` always uses `FileSystemDeleter`. Wire up `RecycleBinFileDeleter` (using `Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile` with `RecycleOption.SendToRecycleBin`) and pick the implementation per cleanup from `AppSettings.SendToRecycleBin`.
+
+**Safety / UX hardening**
+- **Critical-threshold-above-free-space pre-save warning.** If the user sets `CriticalThresholdGb` above the current free space on the drive, Save should warn (e.g. "You're enabling silent cleanup with the threshold above your current free space — files will be deleted on the next poll. Proceed?"). Today it silently fires on the next poll, which is correct behaviour but a sharp edge for first-time opt-in.
+- **Focus-Assist banner.** Dashboard banner ("Cleanup recommended — disk at N%, click to review") so users with Focus Assist suppressing toasts still see the breach state. Alternative path to the Review window when balloons don't surface.
+- **Post-critical persistent banner when cleanup freed nothing.** After a critical-mode silent auto-clean, if disk stays below threshold ~30 min ("cleanup completed but disk still below threshold; free other files manually"). Pairs with the audit-log row from 6d — the data is already captured.
+
+**Polish**
+- **Recent cleanups card displaying `TriggeredBy`.** The column lands in 6f but the dashboard doesn't surface it yet. Add an icon or label per row; pre-6f legacy rows should render as "Manual (legacy)" to distinguish them from genuine manual clears (they all carry `TriggeredBy = "Manual"` from the migration backfill, but their actual provenance is unknown).
+- **Settings re-propagation after Save without waiting for the next poll.** `DiskMonitorService` reads fresh via `Func<AppSettings>` so soft/critical threshold changes apply on the next poll cycle. Other services may snapshot settings. Audit and document or fix.
+- **Dead `ICacheLocator[] _locators` field in `DiskMonitorService`.** Unused since 6b's redesign — delete.
+- **Hysteresis "remind me again in N hours" follow-up.** Today the user dismisses a soft prompt and only sees it again on the next above→below transition (which can take days if disk usage is steady). A settable "remind me in N hours" alongside Snooze would address steady-state low-disk cases.
 
 **Phase 3 — Distribution**
 - [ ] WiX installer (.msi)
@@ -196,11 +211,12 @@ After Effects:
 
 | Field | Value |
 |-------|-------|
-| Last known clean build | 2026-05-18 — Phase 2 through Slice 6b + observability |
+| Last known clean build | 2026-05-19 — Phase 2 complete (Slice 6f) |
 | Build command | `dotnet build` |
 | Test command | `dotnet test` |
-| Last run by Claude | 2026-05-18 — 53/53 tests passing |
+| Last run by Claude | 2026-05-19 — 75/75 tests passing |
 | Log tail | `Get-Content -Wait $env:LOCALAPPDATA\SlateClean\logs\slateclean.log` |
+| DB path | `%LocalAppData%\SlateClean\slateclean.db` |
 
 ### Current Build Errors
 ```
