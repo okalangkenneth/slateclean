@@ -41,6 +41,7 @@ public class CleanupService
             FilesDeleted = 0,
             BytesFreed = 0,
             Success = false,
+            TriggeredBy = nameof(BreachTier.Manual),
         };
 
         _db.CleanupLogs.Add(log);
@@ -124,6 +125,7 @@ public class CleanupService
                 FilesDeleted = 0,
                 BytesFreed = 0,
                 Success = false,
+                TriggeredBy = plan.Tier.ToString(),
             };
             _db.CleanupLogs.Add(log);
             await _db.SaveChangesAsync();

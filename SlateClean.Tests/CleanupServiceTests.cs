@@ -207,4 +207,27 @@ public class CleanupServiceTests : IDisposable
         Assert.Contains(logs, l => l.AppName == "A" && l.FilesDeleted == 1);
         Assert.Contains(logs, l => l.AppName == "B" && l.FilesDeleted == 1);
     }
+
+    [Fact]
+    public async Task CleanAsync_stamps_Manual_TriggeredBy_on_the_log_row()
+    {
+        // The non-plan path: tray "Clear Now" click. Per Slice 6f, every
+        // log row carries a tier attribution; the manual path is "Manual".
+        var now = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        WriteFile("old.dat", now.AddDays(-2), sizeBytes: 100);
+
+        var locator = new FakeLocator { Directory = new DirectoryInfo(_root) };
+        using var db = NewContext();
+        var svc = new CleanupService(
+            new[] { (ICacheLocator)locator }, db,
+            NullLogger<CleanupService>.Instance, new RecordingDeleter(), () => now);
+
+        var log = await svc.CleanAsync(locator);
+
+        Assert.True(log.Success);
+        Assert.Equal("Manual", log.TriggeredBy);
+
+        using var verify = NewContext();
+        Assert.Equal("Manual", verify.CleanupLogs.Single().TriggeredBy);
+    }
 }

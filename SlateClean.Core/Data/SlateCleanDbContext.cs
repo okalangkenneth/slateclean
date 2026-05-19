@@ -46,6 +46,11 @@ public class SlateCleanDbContext : DbContext
         AddColumnIfMissing("Settings", "CriticalThresholdGb", "INTEGER NOT NULL DEFAULT 5");
         AddColumnIfMissing("Settings", "SnoozedUntilUtc", "TEXT NULL");
 
+        // Slice 6f — tier attribution for cleanup history. Legacy rows
+        // default to "Manual" (every cleanup before 6c was a Clear Now
+        // click; the planned paths landed in 6c/6d).
+        AddColumnIfMissing("CleanupLogs", "TriggeredBy", "TEXT NOT NULL DEFAULT 'Manual'");
+
         Database.ExecuteSqlRaw(@"
             CREATE TABLE IF NOT EXISTS SettingsAuditLogs (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -73,8 +78,10 @@ public class SlateCleanDbContext : DbContext
             using var info = conn.CreateCommand();
             info.CommandText = $"PRAGMA table_info({table});";
             using var reader = info.ExecuteReader();
+            bool tableExists = false;
             while (reader.Read())
             {
+                tableExists = true;
                 var name = reader["name"] as string;
                 if (string.Equals(name, column, StringComparison.OrdinalIgnoreCase))
                 {
@@ -82,6 +89,12 @@ public class SlateCleanDbContext : DbContext
                 }
             }
             reader.Close();
+
+            // Defensive: PRAGMA table_info on a non-existent table returns
+            // zero rows (it does not error). Treat that as "nothing to do" —
+            // EnsureCreated will materialise the table on first real run, and
+            // a future column will be added by the next migration pass.
+            if (!tableExists) return;
 
             using var alter = conn.CreateCommand();
             alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {typeDecl};";

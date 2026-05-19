@@ -185,6 +185,42 @@ public class CleanupServiceExecutePlanTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecutePlan_stamps_SoftThreshold_TriggeredBy_on_log_rows()
+    {
+        var now = new DateTime(2026, 5, 18, 12, 0, 0, DateTimeKind.Utc);
+        var dir = Directory.CreateDirectory(Path.Combine(_root, "Soft"));
+        var f = WriteFile(dir.FullName, "x.dat", 10);
+        var plan = new CleanupPlan(
+            Guid.NewGuid(), now, BreachTier.SoftThreshold,
+            new[] { new PlannedAppCleanup("Soft", new[] { new PlannedFileDeletion(f, 10, now.AddDays(-2)) }) });
+
+        var svc = NewService(now, new RecordingDeleter());
+        await svc.ExecutePlanAsync(plan);
+
+        using var verify = NewContext();
+        var log = Assert.Single(verify.CleanupLogs);
+        Assert.Equal("SoftThreshold", log.TriggeredBy);
+    }
+
+    [Fact]
+    public async Task ExecutePlan_stamps_CriticalThreshold_TriggeredBy_on_log_rows()
+    {
+        var now = new DateTime(2026, 5, 18, 12, 0, 0, DateTimeKind.Utc);
+        var dir = Directory.CreateDirectory(Path.Combine(_root, "Crit"));
+        var f = WriteFile(dir.FullName, "x.dat", 10);
+        var plan = new CleanupPlan(
+            Guid.NewGuid(), now, BreachTier.CriticalThreshold,
+            new[] { new PlannedAppCleanup("Crit", new[] { new PlannedFileDeletion(f, 10, now.AddDays(-2)) }) });
+
+        var svc = NewService(now, new RecordingDeleter());
+        await svc.ExecutePlanAsync(plan);
+
+        using var verify = NewContext();
+        var log = Assert.Single(verify.CleanupLogs);
+        Assert.Equal("CriticalThreshold", log.TriggeredBy);
+    }
+
+    [Fact]
     public async Task ExecutePlan_handles_empty_plan_without_error()
     {
         var now = new DateTime(2026, 5, 18, 12, 0, 0, DateTimeKind.Utc);
