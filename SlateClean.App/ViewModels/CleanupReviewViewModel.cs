@@ -44,6 +44,7 @@ public partial class CleanupReviewViewModel : ObservableObject
     public void Load(CleanupPlan plan)
     {
         _plan = plan;
+        IsExecuting = false;
         PlanIdDisplay = plan.PlanId.ToString().Substring(0, 8);
         TierDisplay = plan.Tier switch
         {
@@ -64,6 +65,11 @@ public partial class CleanupReviewViewModel : ObservableObject
                 FileRows.Add(new ReviewFileRow(app.AppName, file.Path, file.SizeBytes));
             }
         }
+
+        // CleanNow's CanExecute depends on _plan, which is a plain field — no
+        // auto-notify. Re-evaluate after the plan is wired up; otherwise the
+        // button stays stuck in its initial (disabled) state.
+        CleanNowCommand.NotifyCanExecuteChanged();
     }
 
     private bool CanCleanNow() => !IsExecuting && _plan is not null && _plan.TotalFiles > 0;

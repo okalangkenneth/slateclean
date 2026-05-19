@@ -108,7 +108,7 @@
                                                Text="{Binding AppName}"
                                                FontSize="11" Foreground="#9ca3af"/>
                                     <TextBlock Grid.Column="1"
-                                               Text="{Binding Path}"
+                                               Text="{Binding FileName}"
                                                FontSize="11" FontFamily="Consolas"
                                                Foreground="#374151"
                                                TextTrimming="CharacterEllipsis"
@@ -144,9 +144,37 @@
                         Margin="0,0,8,0"/>
                 <Button Content="Clean now"
                         Command="{Binding CleanNowCommand}"
-                        Width="110" Padding="0,6"
-                        Background="#3b82f6" Foreground="White"
-                        BorderBrush="#3b82f6"/>
+                        Width="110" Padding="0,6">
+                    <!-- A custom template so the Foreground we set survives
+                         the disabled state (the default Aero ButtonChrome
+                         paints disabled text in #ADADAD which is nearly
+                         invisible against our blue Background). -->
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd"
+                                    Background="#3b82f6"
+                                    BorderBrush="#3b82f6"
+                                    BorderThickness="1"
+                                    CornerRadius="3"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="White"
+                                                  TextElement.FontWeight="SemiBold"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Bd" Property="Background" Value="#93c5fd"/>
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#93c5fd"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#2563eb"/>
+                                    <Setter TargetName="Bd" Property="BorderBrush" Value="#2563eb"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
             </StackPanel>
         </Grid>
     </Grid>

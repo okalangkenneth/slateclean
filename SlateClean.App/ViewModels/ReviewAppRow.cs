@@ -22,10 +22,12 @@ public sealed class ReviewFileRow
     {
         AppName = appName;
         Path = path;
+        FileName = System.IO.Path.GetFileName(path);
         SizeDisplay = ByteFormatter.Format(sizeBytes);
     }
 
     public string AppName { get; }
     public string Path { get; }
+    public string FileName { get; }
     public string SizeDisplay { get; }
 }

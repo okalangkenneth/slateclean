@@ -203,6 +203,14 @@ public class TrayIconManager : IDisposable
 
     private void OnThresholdBreached(object? sender, DiskThresholdBreachedEventArgs e)
     {
+        // Soft breaches are owned by AutoCleanCoordinator → PlanBuilt →
+        // OnPlanBuilt, which raises the "review proposed cleanup" balloon.
+        // Firing the generic Phase 1 balloon here too produced duplicate
+        // notifications where only one was the click target for the Review
+        // window. Critical breaches keep this generic balloon until slice 6d
+        // adds silent execution.
+        if (e.Tier == BreachTier.SoftThreshold) return;
+
         var freeGb = e.FreeBytes / 1024.0 / 1024.0 / 1024.0;
         var thresholdGb = e.ThresholdBytes / 1024.0 / 1024.0 / 1024.0;
         _notifyIcon.ShowBalloonTip(
