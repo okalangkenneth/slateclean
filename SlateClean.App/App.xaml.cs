@@ -80,6 +80,18 @@ public partial class App : System.Windows.Application
             sp.GetServices<ICacheLocator>().ToArray());
 
         services.AddSingleton<CacheLocator>();
+
+        // File deletion dispatcher — picks between permanent delete and
+        // Recycle Bin per call based on AppSettings.SendToRecycleBin.
+        // The two concretes are unregistered (DI doesn't see them as
+        // IFileDeleter) so only the dispatcher resolves for that interface.
+        services.AddSingleton<FileSystemDeleter>();
+        services.AddSingleton<RecycleBinFileDeleter>();
+        services.AddSingleton<IFileDeleter>(sp => new SettingsAwareFileDeleter(
+            sp.GetRequiredService<FileSystemDeleter>(),
+            sp.GetRequiredService<RecycleBinFileDeleter>(),
+            () => sp.GetRequiredService<SettingsRepository>().Load()));
+
         services.AddSingleton<CleanupService>();
         services.AddSingleton<CleanupHistoryService>();
         services.AddSingleton<DiskMonitorService>(sp => new DiskMonitorService(
