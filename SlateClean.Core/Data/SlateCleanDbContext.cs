@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using SlateClean.Core.Models;
 
@@ -7,6 +8,7 @@ public class SlateCleanDbContext : DbContext
 {
     public DbSet<CleanupLog> CleanupLogs => Set<CleanupLog>();
     public DbSet<AppSettings> Settings => Set<AppSettings>();
+    public DbSet<SettingsAuditLog> SettingsAuditLogs => Set<SettingsAuditLog>();
 
     public SlateCleanDbContext() { }
 
@@ -28,5 +30,79 @@ public class SlateCleanDbContext : DbContext
         var path = DefaultDatabasePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         optionsBuilder.UseSqlite($"Data Source={path}");
+    }
+
+    // Idempotent schema upgrade for databases created by earlier slices.
+    // EnsureCreated() creates tables when absent but never adds columns to
+    // tables that already exist; the helpers below close that gap with
+    // ALTER TABLE / CREATE TABLE IF NOT EXISTS so users keep their history
+    // across feature additions without manual file deletion.
+    public void EnsureSchemaUpToDate()
+    {
+        Database.EnsureCreated();
+
+        AddColumnIfMissing("Settings", "SendToRecycleBin", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("Settings", "CriticalThresholdEnabled", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("Settings", "CriticalThresholdGb", "INTEGER NOT NULL DEFAULT 5");
+        AddColumnIfMissing("Settings", "SnoozedUntilUtc", "TEXT NULL");
+
+        // Slice 6f — tier attribution for cleanup history. Legacy rows
+        // default to "Manual" (every cleanup before 6c was a Clear Now
+        // click; the planned paths landed in 6c/6d).
+        AddColumnIfMissing("CleanupLogs", "TriggeredBy", "TEXT NOT NULL DEFAULT 'Manual'");
+
+        Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS SettingsAuditLogs (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                TimestampUtc TEXT NOT NULL,
+                EventType TEXT NOT NULL,
+                Details TEXT NULL
+            );");
+
+        // Slice 6d — extend the audit table with CriticalFire-specific columns.
+        // Existing opt-in rows leave these NULL; CriticalFire rows populate all.
+        AddColumnIfMissing("SettingsAuditLogs", "FreeBytesAtTrigger", "INTEGER NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "CriticalThresholdGb", "INTEGER NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "PlanId", "TEXT NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "FilesDeleted", "INTEGER NULL");
+        AddColumnIfMissing("SettingsAuditLogs", "BytesFreed", "INTEGER NULL");
+    }
+
+    private void AddColumnIfMissing(string table, string column, string typeDecl)
+    {
+        var conn = Database.GetDbConnection();
+        bool opened = conn.State != ConnectionState.Open;
+        if (opened) conn.Open();
+        try
+        {
+            using var info = conn.CreateCommand();
+            info.CommandText = $"PRAGMA table_info({table});";
+            using var reader = info.ExecuteReader();
+            bool tableExists = false;
+            while (reader.Read())
+            {
+                tableExists = true;
+                var name = reader["name"] as string;
+                if (string.Equals(name, column, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+            reader.Close();
+
+            // Defensive: PRAGMA table_info on a non-existent table returns
+            // zero rows (it does not error). Treat that as "nothing to do" —
+            // EnsureCreated will materialise the table on first real run, and
+            // a future column will be added by the next migration pass.
+            if (!tableExists) return;
+
+            using var alter = conn.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {typeDecl};";
+            alter.ExecuteNonQuery();
+        }
+        finally
+        {
+            if (opened) conn.Close();
+        }
     }
 }
