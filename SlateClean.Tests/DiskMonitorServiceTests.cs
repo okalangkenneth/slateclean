@@ -294,6 +294,74 @@ public class DiskMonitorServiceTests
     }
 
     [Fact]
+    public void Poll_throttled_edge_re_emits_after_throttle_expires()
+    {
+        // Regression: a throttled false→true edge must NOT be consumed silently.
+        // The hysteresis state stays "above" until emission actually succeeds,
+        // so the next eligible poll re-detects the edge and fires.
+        var time = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var monitor = new StubMonitor(() => time, Settings(softGb: 20))
+        {
+            FreeBytesValue = 5 * Gb,
+        };
+        var count = 0;
+        monitor.DiskThresholdBreached += (_, _) => count++;
+
+        monitor.Poll();                              // fires (first below)
+        time = time.AddMinutes(1);
+        monitor.FreeBytesValue = 50 * Gb;
+        monitor.Poll();                              // recovery (re-arms)
+        time = time.AddMinutes(1);
+        monitor.FreeBytesValue = 5 * Gb;
+        monitor.Poll();                              // edge but throttled
+        Assert.Equal(1, count);
+
+        time = time.AddMinutes(10);                  // throttle window elapsed
+        monitor.Poll();                              // edge still pending → fires
+
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void Poll_cross_tier_throttle_does_not_swallow_subsequent_soft_edge()
+    {
+        // Original bug repro: critical fires, then within the 5-min shared
+        // throttle the user raises soft threshold to provoke a soft breach.
+        // The throttled soft edge must not be consumed — once the throttle
+        // window elapses, the next poll must emit the soft breach.
+        var time = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
+        var settings = new AppSettings
+        {
+            ThresholdGb = 15,                        // soft: free=18 is above
+            CriticalThresholdEnabled = true,
+            CriticalThresholdGb = 20,                // critical: free=18 is below
+        };
+        var monitor = new StubMonitor(() => time, () => settings)
+        {
+            FreeBytesValue = 18 * Gb,
+        };
+        var received = new List<BreachTier>();
+        monitor.DiskThresholdBreached += (_, e) => received.Add(e.Tier);
+
+        monitor.Poll();                              // critical fires
+        Assert.Single(received);
+        Assert.Equal(BreachTier.CriticalThreshold, received[0]);
+
+        // Within the 5-min throttle, user raises soft threshold past free space.
+        time = time.AddMinutes(2);
+        settings.ThresholdGb = 25;                   // soft now: free=18 is below
+        monitor.Poll();                              // soft edge but throttled
+        Assert.Single(received);
+
+        // Throttle window elapsed — soft edge must still emit.
+        time = time.AddMinutes(10);
+        monitor.Poll();
+
+        Assert.Equal(2, received.Count);
+        Assert.Equal(BreachTier.SoftThreshold, received[1]);
+    }
+
+    [Fact]
     public void Poll_critical_wins_when_both_tiers_transition_in_same_poll()
     {
         var time = new DateTime(2026, 5, 16, 12, 0, 0, DateTimeKind.Utc);
