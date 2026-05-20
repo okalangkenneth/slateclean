@@ -1,8 +1,10 @@
+using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SlateClean.App.Logging;
+using SlateClean.App.Services;
 using SlateClean.App.TrayIcon;
 using SlateClean.App.ViewModels;
 using SlateClean.App.Views;
@@ -87,12 +89,16 @@ public partial class App : System.Windows.Application
         services.AddSingleton<StartupService>();
         services.AddSingleton<SettingsRepository>();
         services.AddSingleton<AutoCleanCoordinator>();
+        services.AddSingleton<IConfirmationService, MessageBoxConfirmationService>();
 
         // ViewModels and Windows — singletons so window state and VM state
         // persist across hide/show cycles.
         services.AddSingleton<DashboardViewModel>();
         services.AddSingleton<DashboardWindow>();
-        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<SettingsViewModel>(sp => new SettingsViewModel(
+            sp.GetRequiredService<SettingsRepository>(),
+            sp.GetRequiredService<IConfirmationService>(),
+            () => new DriveInfo(sp.GetRequiredService<DiskMonitorService>().DriveRoot).AvailableFreeSpace));
         services.AddSingleton<SettingsWindow>();
         services.AddSingleton<CleanupReviewViewModel>();
         services.AddSingleton<CleanupReviewWindow>();
