@@ -88,24 +88,30 @@ public class DiskMonitorService : IDisposable
         var softBytes = (long)settings.ThresholdGb * 1024L * 1024L * 1024L;
         var criticalBytes = (long)settings.CriticalThresholdGb * 1024L * 1024L * 1024L;
 
-        // Capture previous state, then update from current observation.
-        // Critical is only considered "below" if the user opted into the tier.
+        // Capture previous state and the candidate new state. Eagerly clear
+        // "below" state on recovery (above threshold) so hysteresis re-arms;
+        // but defer committing the false→true edge until AFTER snooze and
+        // throttle have decided whether we'll actually emit. Otherwise a
+        // suppressed edge is consumed silently and the breach never re-fires.
         var softWasBelow = _softBelow;
         var criticalWasBelow = _criticalBelow;
-        _softBelow = freeBytes < softBytes;
-        _criticalBelow = settings.CriticalThresholdEnabled && freeBytes < criticalBytes;
+        var softNowBelow = freeBytes < softBytes;
+        var criticalNowBelow = settings.CriticalThresholdEnabled && freeBytes < criticalBytes;
+
+        if (!softNowBelow) _softBelow = false;
+        if (!criticalNowBelow) _criticalBelow = false;
 
         // Edge-trigger: only the false→true transition fires. Critical takes
         // precedence when both tiers transition in the same poll (e.g. a sudden
         // drop), since silent execution is the more urgent path.
         BreachTier? tier = null;
         long thresholdBytes = 0;
-        if (_criticalBelow && !criticalWasBelow)
+        if (criticalNowBelow && !criticalWasBelow)
         {
             tier = BreachTier.CriticalThreshold;
             thresholdBytes = criticalBytes;
         }
-        else if (_softBelow && !softWasBelow)
+        else if (softNowBelow && !softWasBelow)
         {
             tier = BreachTier.SoftThreshold;
             thresholdBytes = softBytes;
@@ -139,6 +145,10 @@ public class DiskMonitorService : IDisposable
             }
             _lastEventAtUtc = observedAt;
         }
+
+        // Throttle (and snooze) cleared — commit the false→true edge now.
+        if (tier == BreachTier.CriticalThreshold) _criticalBelow = true;
+        else _softBelow = true;
 
         _logger.LogWarning(
             "[DiskMonitor] {Tier} breach: free {FreeGb}GB below {ThresholdGb}GB",

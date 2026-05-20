@@ -129,7 +129,7 @@ After Effects:
 - 24 xUnit tests — all passing
 
 ### 🔨 IN PROGRESS
-- None — Phase 2 complete (2026-05-19). Next scope (Phase 2.1 polish vs Phase 3 distribution) pending decision.
+- None — Phase 2.1 complete (2026-05-20). Next scope: tag `v0.2.1`, merge worktree, decide Phase 3 (distribution) vs further polish.
 
 ### ✅ COMPLETED (Phase 2 — fully done 2026-05-19)
 - Slice 1 — DI host + singleton DashboardWindow/VM, tray double-click, Hide-on-close — `ab9d2e8`
@@ -144,6 +144,11 @@ After Effects:
 - Slice 6e — Snooze 1h persistence via `AppSettings.SnoozedUntilUtc`; soft-tier breaches respect it, critical-tier breaches ignore it (the design-note invariant is pinned by `Poll_emits_critical_breach_even_while_snoozed`) — `7f8f198`
 - Slice 6f — `TriggeredBy` column on `CleanupLog` (`Manual` / `SoftThreshold` / `CriticalThreshold`). Migration backfills legacy rows to `Manual` via `DEFAULT 'Manual'` ALTER. Verified end-to-end against the live DB on 2026-05-19 — all three paths land the correct tier — `9271d2d`
 - Observability — FileLoggerProvider writes Information+ to `%LocalAppData%\SlateClean\logs\slateclean.log` so manual verification can tail with `Get-Content -Wait` — `109d2a2`
+
+### ✅ COMPLETED (Phase 2.1 — fully done 2026-05-20)
+- Hysteresis edge no longer consumed by 5-min throttle. `DiskMonitorService.Poll` now defers the false→true edge commit until after snooze/throttle clears — throttled edges stay pending and re-emit on the next eligible poll. Eager reset on recovery (above→below transition observed as "not below") stays inline so hysteresis re-arms without delay. Two regression tests pin the contract (`Poll_throttled_edge_re_emits_after_throttle_expires`, `Poll_cross_tier_throttle_does_not_swallow_subsequent_soft_edge`). Verified live against the worktree build: first emit at 12:34:23, throttle window 12:34:23→12:39:23, edge held through 12:39:23 poll (sub-second margin still inside the 300s window), re-emitted at 12:40:23 with a fresh plan — `ece0b4c`
+- Critical-threshold-above-free-space pre-save warning. New `IConfirmationService` seam in `SlateClean.App/Services/` (Yes/No MessageBox impl for production; fake stub in tests) gates `SettingsViewModel.Save` when `CriticalThresholdEnabled` is on AND `CriticalThresholdGb` (in bytes) exceeds the current free space on the configured drive. Cancel keeps the VM edits intact and leaves the window open. Five new ViewModel tests cover safe, dangerous-but-disabled, dangerous-enabled-prompted, confirm-persists, cancel-preserves-VM. Verified live: safe save bypassed dialog (Case A), dangerous + No left repo untouched (Case B1), dangerous + Yes persisted 700 GB threshold and the next poll fired a `CriticalFire` audit row at 13:48:20 UTC — `ce6b0f7`
+- `SendToRecycleBin` setting now honored at the deletion site. New `RecycleBinFileDeleter` wraps `Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile` with `RecycleOption.SendToRecycleBin`; new `SettingsAwareFileDeleter` dispatcher reads `AppSettings.SendToRecycleBin` fresh on every `Delete` call and forwards to the permanent or recycle-bin concrete. Dispatcher registered as the DI `IFileDeleter`; `CleanupService` unchanged (all safety invariants — 24h guard, known-paths rule, CleanupLog row written before deletion — flow exactly as before). Four new tests: false→permanent, true→recycle, settings-flip-per-call, and a CleanupService integration test that runs ExecutePlanAsync twice with the dispatcher (once each setting) and asserts both CleanupLog rows land. Verified live in two passes: SendToRecycleBin=0 → 3 test fixtures permanently deleted, Recycle Bin empty; toggle ON via Settings UI (no app restart) → 3 new fixtures vanished from cache, all 3 present in the Recycle Bin — `f427114`
 
 ### ❌ REMAINING
 
@@ -176,14 +181,9 @@ After Effects:
 ### 📋 Backlog (post-Phase-2, grouped by intent for prioritisation)
 
 **Functional defects** (correctness bugs, fix before distribution)
-- **Hysteresis edge consumed by 5-min throttle** (discovered 2026-05-19, Slice 6f manual verification). When a breach is throttled, `DiskMonitorService` still updates `_softBelow`/`_criticalBelow` unconditionally — so the false→true edge is consumed silently and won't re-fire after the throttle expires. Repro: trigger a critical fire, then within 5 minutes change the soft threshold to provoke a soft breach. The transition is detected but suppressed by the shared throttle, and subsequent polls see no transition. User-visible: balloon never appears even after waiting out the 5 minutes. Required an app restart to recover during verification; tray "Clear Now" (which bypasses the coordinator) was the alternative escape hatch. Fix candidates:
-  1. **Option 1 — RECOMMENDED.** Defer the hysteresis state update until AFTER the throttle check, so a throttled edge stays available for the next poll. Smallest blast radius — single-line move inside `DiskMonitorService.Poll`.
-  2. Per-tier throttle instead of shared. More work; also closes the cross-tier suppression case (currently a critical fire suppresses any soft fire within 5 minutes and vice versa).
-  3. Track `_lastEmittedAt` per tier and re-emit on the first eligible poll after throttle expires if still below.
-- **`SendToRecycleBin` persisted but not honored.** The setting is read/written via `SettingsRepository` and shown in the Settings UI, but `CleanupService` always uses `FileSystemDeleter`. Wire up `RecycleBinFileDeleter` (using `Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile` with `RecycleOption.SendToRecycleBin`) and pick the implementation per cleanup from `AppSettings.SendToRecycleBin`.
+- _(empty — hysteresis-edge-throttle and `SendToRecycleBin` wiring both closed in Phase 2.1, see Completed above)_
 
 **Safety / UX hardening**
-- **Critical-threshold-above-free-space pre-save warning.** If the user sets `CriticalThresholdGb` above the current free space on the drive, Save should warn (e.g. "You're enabling silent cleanup with the threshold above your current free space — files will be deleted on the next poll. Proceed?"). Today it silently fires on the next poll, which is correct behaviour but a sharp edge for first-time opt-in.
 - **Focus-Assist banner.** Dashboard banner ("Cleanup recommended — disk at N%, click to review") so users with Focus Assist suppressing toasts still see the breach state. Alternative path to the Review window when balloons don't surface.
 - **Post-critical persistent banner when cleanup freed nothing.** After a critical-mode silent auto-clean, if disk stays below threshold ~30 min ("cleanup completed but disk still below threshold; free other files manually"). Pairs with the audit-log row from 6d — the data is already captured.
 
@@ -211,10 +211,10 @@ After Effects:
 
 | Field | Value |
 |-------|-------|
-| Last known clean build | 2026-05-19 — Phase 2 complete (Slice 6f) |
+| Last known clean build | 2026-05-20 — Phase 2.1 complete (hysteresis fix + critical pre-save warning + SendToRecycleBin wiring) |
 | Build command | `dotnet build` |
 | Test command | `dotnet test` |
-| Last run by Claude | 2026-05-19 — 75/75 tests passing |
+| Last run by Claude | 2026-05-20 — 86/86 tests passing |
 | Log tail | `Get-Content -Wait $env:LOCALAPPDATA\SlateClean\logs\slateclean.log` |
 | DB path | `%LocalAppData%\SlateClean\slateclean.db` |
 
